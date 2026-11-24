@@ -1,14 +1,22 @@
 // LONEWOLF OS service worker: makes the app work offline.
 // When you change ANY file, bump VERSION so devices download the new files.
-const VERSION = '1.0.0';
+const VERSION = '2.0.0';
 const CACHE = 'lonewolf-' + VERSION;
 
-// Files saved for offline use on install (includes the 17 MB PHP engine)
+// Files saved for offline use on install (includes the 17 MB PHP engine).
+// Python (14 MB) is saved the first time you run Python code.
 const CORE = [
   './',
   './index.html',
   './app.js',
   './pwa.js',
+  './forge.js',
+  './rig.js',
+  './libs/doc/mammoth.browser.min.js',
+  './libs/doc/pdf.min.js',
+  './libs/doc/pdf.worker.min.js',
+  './libs/sb/supabase.js',
+  './libs/sb/591.supabase.js',
   './manifest.webmanifest',
   './libs/marked.min.js',
   './libs/cm/codemirror-bundle.js',

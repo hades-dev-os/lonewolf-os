@@ -6,12 +6,15 @@
 
   function showNet() {
     const on = navigator.onLine;
-    net.textContent = on ? 'online' : 'offline mode';
+    let last = 0; try { last = +localStorage.getItem('lw-lastsync') || 0; } catch (e) {}
+    const t = last ? ' · synced ' + new Date(last).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+    net.textContent = (on ? 'online' : 'offline mode') + t;
     dot.classList.toggle('on', on);
     dot.title = on ? 'Online' : 'Offline: everything you added still works';
   }
   addEventListener('online', showNet);
   addEventListener('offline', showNet);
+  addEventListener('lw-synced', showNet);
   showNet();
 
   // Install button (Chrome / Edge / Android)

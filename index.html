@@ -191,6 +191,21 @@ h2{font:500 18px/1.3 var(--mono);margin:0}
 /* toast */
 .lbl2{display:block;font:12px var(--mono);color:var(--dim);margin-bottom:6px}
 .ctx{margin:0;max-height:220px;overflow:auto;background:#030405;border:1px solid var(--line2);border-radius:8px;padding:10px;font:12px/1.5 var(--mono);color:var(--dim);white-space:pre-wrap;overflow-wrap:anywhere}
+.forge{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;max-width:1300px}
+.fcol{display:flex;flex-direction:column;gap:18px}
+.fbox{padding:18px;display:flex;flex-direction:column;gap:10px}
+.hint2{margin:0;color:var(--dim);font:13px/1.5 var(--read)}
+.ta{width:100%;min-height:110px;resize:vertical;background:#030405;border:1px solid var(--line2);border-radius:8px;padding:10px;font:13px/1.5 var(--mono)}
+.inp{width:100%;background:var(--p2);border:1px solid var(--line2);border-radius:7px;padding:9px 10px;font-size:16px;min-height:42px;margin-top:4px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+.grid2 label{font-size:12px;color:var(--dim)}
+.plist{display:flex;flex-direction:column;gap:4px;max-height:260px;overflow:auto;font-size:13px}
+.plist div{display:flex;gap:8px;align-items:center;padding:5px 8px;border-radius:6px;background:var(--p2)}
+.warn{color:var(--amber);font-size:13px}
+.vrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.vrow small{display:block;color:var(--mute)}
+.crow{display:grid;grid-template-columns:90px minmax(0,1fr) 60px;gap:10px;align-items:center;font-size:13px;margin:6px 0}
+@media(max-width:1000px){.forge{grid-template-columns:minmax(0,1fr)}}
 .toast{position:fixed;left:50%;bottom:28px;transform:translate(-50%,30px);opacity:0;z-index:60;padding:12px 18px;border-radius:9px;font:13px var(--mono);border:1px solid var(--go2);background:#07140d;color:var(--go);transition:.25s;pointer-events:none;white-space:nowrap}
 .toast.on{opacity:1;transform:translate(-50%,0)}
 .toast.bad{border-color:#5a1d26;background:#16070a;color:var(--red)}
@@ -210,7 +225,7 @@ h2{font:500 18px/1.3 var(--mono);margin:0}
 @media(max-width:860px){
 .app{grid-template-columns:minmax(0,1fr);grid-template-rows:52px minmax(0,1fr) 62px}
 .rail{grid-row:3;flex-direction:row;padding:6px;border-right:0;border-top:1px solid var(--line);gap:2px;overflow-x:auto}
-.tab{flex:1;flex-direction:column;gap:3px;padding:6px 4px;font-size:10px;min-width:62px;justify-content:center;text-align:center}
+.tab{flex:1;flex-direction:column;gap:3px;padding:6px 2px;font-size:10px;min-width:54px;justify-content:center;text-align:center}
 .tab span small,.rail .foot{display:none}
 .intel,.split{grid-template-columns:minmax(0,1fr);height:auto}
 .nlist,.dlist{flex-direction:row;overflow-x:auto;padding-bottom:4px}
@@ -249,6 +264,7 @@ h2{font:500 18px/1.3 var(--mono);margin:0}
       <div><b>LONEWOLF OS</b><small id="netTxt">study rig</small></div>
     </div>
     <select class="mod" id="modSel" aria-label="Module"></select>
+    <span class="pill" id="examChip" hidden></span>
     <div class="sp"></div>
     <div class="rank" title="Rank progress">
       <span class="sync" id="sync" title="Status"></span>
@@ -263,8 +279,10 @@ h2{font:500 18px/1.3 var(--mono);margin:0}
     <button class="tab" role="tab" data-v="intel"><svg viewBox="0 0 24 24"><path d="M4 4h12l4 4v12H4z"/><path d="M8 11h8M8 15h8M8 7h5"/></svg><span>Intel<small>mission cards</small></span></button>
     <button class="tab" role="tab" data-v="burner"><svg viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="2"/><path d="M10 18h4"/></svg><span>Burner<small>flashcards</small></span></button>
     <button class="tab" role="tab" data-v="blackbook"><svg viewBox="0 0 24 24"><path d="M5 3h12a2 2 0 0 1 2 2v16H7a2 2 0 0 1-2-2z"/><path d="M5 17a2 2 0 0 1 2-2h12"/><path d="M9 7h6"/></svg><span>Blackbook<small>write it blind</small></span></button>
-    <button class="tab" role="tab" data-v="terminal"><svg viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="16" rx="2"/><path d="M6 9l3 3-3 3M11 15h6"/></svg><span>Terminal<small>run real PHP</small></span></button>
+    <button class="tab" role="tab" data-v="terminal"><svg viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="16" rx="2"/><path d="M6 9l3 3-3 3M11 15h6"/></svg><span>Terminal<small>run real code</small></span></button>
     <button class="tab" role="tab" data-v="log"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Breach log<small>rank &amp; progress</small></span></button>
+    <button class="tab" role="tab" data-v="forge"><svg viewBox="0 0 24 24"><path d="M3 14h12l3-4H6z"/><path d="M8 14v3a3 3 0 0 0 6 0v-3"/><path d="M12 3v4M17 4l-2 3M7 4l2 3"/></svg><span>Forge<small>build modules</small></span></button>
+    <button class="tab" role="tab" data-v="rig"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1"/></svg><span>Rig<small>settings &amp; sync</small></span></button>
     <div class="foot"><span id="verTxt"></span><br>Space flips cards.<br>1 = trace, 2 = access.<br>Ctrl+Enter runs code.</div>
   </nav>
 
@@ -344,9 +362,100 @@ h2{font:500 18px/1.3 var(--mono);margin:0}
       <div class="logg">
         <div class="panel grid"><h2 style="margin-bottom:10px">Node map</h2><div id="nodeGrid"></div></div>
         <div style="display:flex;flex-direction:column;gap:18px">
+          <div class="panel" style="padding:18px"><h2 style="margin-bottom:10px">Daily contract</h2><div id="contract"></div></div>
           <div class="panel ladder"><h2>Rank ladder</h2><div id="ladder"></div></div>
           <div class="panel" style="padding:18px"><h2>Last 28 days</h2><div class="heat" id="heat"></div></div>
           <div class="panel" style="padding:18px"><h2 style="margin-bottom:8px">Wipe trail</h2><p style="margin:0 0 10px;color:var(--dim);font-size:13px">Reset this module's progress. XP stays.</p><button class="btn red" id="wipe">Wipe module progress</button></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="v-forge">
+      <h1>Forge</h1>
+      <p class="sub">Turn notes into modules. Packs and notes are checked before anything touches your vault.</p>
+      <div class="forge">
+        <div class="fcol">
+          <div class="panel fbox">
+            <h2>1 · Load a pack</h2>
+            <p class="hint2">A <code>.lwpack.json</code> file from Claude, Gemini or a backup. Or paste the JSON.</p>
+            <div class="row"><label class="btn" for="fPackFile">Choose pack file</label><input type="file" id="fPackFile" accept=".json,.lwpack,application/json" hidden></div>
+            <textarea class="ta" id="fPackText" placeholder='{"format":"lwpack", ...}' aria-label="Pack JSON"></textarea>
+            <div class="row"><button class="btn go" id="fPackCheck">Check pack</button></div>
+          </div>
+          <div class="panel fbox">
+            <h2>2 · Copy Forge prompt (best quality)</h2>
+            <p class="hint2">Copies instructions for an AI. Paste them into the chat with your notes attached, then load the pack it returns in step 1.</p>
+            <div class="grid2">
+              <label>Target<select class="inp" id="fTarget"></select></label>
+              <label>Code<input class="inp" id="fCode" placeholder="e.g. FLOGIC" maxlength="12"></label>
+              <label>Module name<input class="inp" id="fName" placeholder="e.g. Formal Logic"></label>
+              <label>Language<select class="inp" id="fLang"><option value="none">No code (theory)</option><option value="php">PHP</option><option value="python">Python</option><option value="java">Java</option><option value="csharp">C#</option><option value="sql">SQL</option><option value="javascript">JavaScript</option></select></label>
+            </div>
+            <div class="row"><select class="mod" id="fAi"></select><button class="btn go" id="fPrompt">Copy prompt &amp; open AI</button></div>
+          </div>
+          <div class="panel fbox">
+            <h2>3 · Auto-parse notes (offline)</h2>
+            <p class="hint2">Drop .md, .txt, .docx or .pdf. Headings become nodes, code blocks become drills, "Term: definition" lines become cards. Uses the target and details from step 2.</p>
+            <div class="row"><label class="btn" for="fNotesFile">Choose notes file</label><input type="file" id="fNotesFile" accept=".md,.txt,.docx,.pdf,text/plain,text/markdown" hidden><span class="hint2" id="fNotesName"></span></div>
+            <textarea class="ta" id="fNotesText" placeholder="…or paste notes here" aria-label="Notes text"></textarea>
+            <div class="row"><button class="btn go" id="fParse">Parse offline</button><button class="btn" id="fGemini" hidden>Forge with Gemini ✦</button></div>
+          </div>
+        </div>
+        <div class="fcol">
+          <div class="panel fbox" id="fPreview"><h2>Preview</h2><p class="empty">Load a pack or parse notes. A preview of every change appears here before deploying.</p></div>
+          <div class="panel fbox"><h2>Vault</h2><div id="fVault"></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="v-rig">
+      <h1>Rig</h1>
+      <p class="sub">Settings, sync and backups. Secrets (keys, password) stay on this device only.</p>
+      <div class="forge">
+        <div class="fcol">
+          <div class="panel fbox">
+            <h2>Exams &amp; contract</h2>
+            <div id="rExams" class="grid2"></div>
+            <p class="hint2" style="margin-top:8px">Daily contract targets</p>
+            <div class="grid2">
+              <label>Cards<input class="inp" type="number" min="0" id="rcCards"></label>
+              <label>Drills<input class="inp" type="number" min="0" id="rcDrills"></label>
+              <label>Missions<input class="inp" type="number" min="0" id="rcMissions"></label>
+            </div>
+          </div>
+          <div class="panel fbox">
+            <h2>Gemini (optional, free tier)</h2>
+            <p class="hint2">A key from Google AI Studio unlocks the in-app Ask and one-click Forge while online. On the free tier Google may use what you send to improve its models.</p>
+            <div class="grid2">
+              <label>API key<input class="inp" type="password" id="rgKey" autocomplete="off" placeholder="AIza…"></label>
+              <label>Model<input class="inp" id="rgModel" placeholder="gemini-2.5-flash"></label>
+            </div>
+            <div class="row"><button class="btn" id="rgSave">Save key</button><button class="btn" id="rgTest">Test</button><span class="hint2" id="rgMsg"></span></div>
+          </div>
+          <div class="panel fbox">
+            <h2>Backup</h2>
+            <p class="hint2">One file with your progress and every vault module. Use it to move progress between devices without sync.</p>
+            <div class="row"><button class="btn go" id="rBackup">Export backup</button><label class="btn" for="rRestore">Restore backup</label><input type="file" id="rRestore" accept=".json" hidden></div>
+            <div class="row" style="margin-top:10px"><button class="btn red" id="rWipeAll">Wipe everything on this device</button></div>
+          </div>
+        </div>
+        <div class="fcol">
+          <div class="panel fbox">
+            <h2>Sync (Supabase, free)</h2>
+            <p class="hint2" id="sState">Not connected. Everything stays on this device.</p>
+            <div class="grid2">
+              <label>Project URL<input class="inp" id="sUrl" placeholder="https://xxxx.supabase.co"></label>
+              <label>Anon public key<input class="inp" id="sKey" placeholder="eyJ…" autocomplete="off"></label>
+              <label>Email<input class="inp" type="email" id="sEmail" autocomplete="username"></label>
+              <label>Password<input class="inp" type="password" id="sPass" autocomplete="current-password"></label>
+            </div>
+            <div class="row"><button class="btn" id="sSignUp">Create account</button><button class="btn go" id="sSignIn">Sign in</button><button class="btn" id="sNow">Sync now</button><button class="btn" id="sOut">Sign out</button></div>
+            <details class="hint2" style="margin-top:12px"><summary>One-time database setup (SQL)</summary><pre class="ctx" id="sSql"></pre><button class="btn sm" id="sCopySql">Copy SQL</button></details>
+          </div>
+          <div class="panel fbox">
+            <h2>About</h2>
+            <p class="hint2" id="rAbout"></p>
+          </div>
         </div>
       </div>
     </section>
@@ -378,6 +487,8 @@ h2{font:500 18px/1.3 var(--mono);margin:0}
 <script src="libs/marked.min.js"></script>
 <script src="libs/cm/codemirror-bundle.js"></script>
 <script src="app.js"></script>
+<script src="forge.js"></script>
+<script src="rig.js"></script>
 <script src="pwa.js"></script>
 </body>
 </html>
