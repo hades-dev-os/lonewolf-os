@@ -17,10 +17,11 @@
   addEventListener('lw-synced', showNet);
   showNet();
 
-  // Install button (Chrome / Edge / Android)
+  // Install button (Chrome / Edge / Android), hidden when already running as the installed app
+  const installed = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
   let deferred = null;
   const btn = document.getElementById('installBtn');
-  addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferred = e; btn.hidden = false; });
+  addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferred = e; if (!installed) btn.hidden = false; });
   btn.addEventListener('click', async () => {
     if (!deferred) return;
     deferred.prompt();
@@ -36,10 +37,11 @@
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       if (reloaded || !hadController) return; reloaded = true; location.reload();
     });
-    navigator.serviceWorker.register('sw.js').then(reg => {
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
       const ask = sw => { const ch = new MessageChannel(); ch.port1.onmessage = m => { ver.textContent = 'v' + m.data; }; sw.postMessage('version', [ch.port2]); };
       navigator.serviceWorker.ready.then(r => r.active && ask(r.active));
-      setInterval(() => reg.update(), 60 * 60 * 1000); // check for updates hourly
+      reg.update();                                   // check for an update every time the app opens
+      setInterval(() => reg.update(), 60 * 60 * 1000); // and hourly while it stays open
     }).catch(() => { ver.textContent = 'offline engine unavailable'; });
   }
 }
