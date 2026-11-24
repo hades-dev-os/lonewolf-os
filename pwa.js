@@ -17,7 +17,7 @@
   addEventListener('lw-synced', showNet);
   showNet();
 
-  // Install button (Chrome / Edge / Android), hidden when already running as the installed app
+  // Install button (Chrome / Edge / Android)
   const installed = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
   let deferred = null;
   const btn = document.getElementById('installBtn');
@@ -40,8 +40,7 @@
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
       const ask = sw => { const ch = new MessageChannel(); ch.port1.onmessage = m => { ver.textContent = 'v' + m.data; }; sw.postMessage('version', [ch.port2]); };
       navigator.serviceWorker.ready.then(r => r.active && ask(r.active));
-      reg.update();                                   // check for an update every time the app opens
-      setInterval(() => reg.update(), 60 * 60 * 1000); // and hourly while it stays open
+      setInterval(() => reg.update(), 60 * 60 * 1000); // check for updates hourly
     }).catch(() => { ver.textContent = 'offline engine unavailable'; });
   }
 }

@@ -9,9 +9,11 @@ const local = {
 const clone = o => JSON.parse(JSON.stringify(o || {}));
 
 // ================= Gemini (free tier key, stays on this device) =================
+// The key is saved on this device AND in your private sync row, so every signed-in device gets it.
+const cfg = () => (LW.S.cfg ||= {});
 LW.gemini = {
-  key: () => local.get('lw-gem-key'),
-  model: () => local.get('lw-gem-model') || 'gemini-2.5-flash',
+  key: () => local.get('lw-gem-key') || cfg().gemKey || '',
+  model: () => local.get('lw-gem-model') || cfg().gemModel || 'gemini-2.5-flash',
   async ask(prompt, json) {
     const key = this.key();
     if (!key) throw new Error('no API key set in Rig');
@@ -30,9 +32,11 @@ LW.gemini = {
   }
 };
 $('#rgSave').addEventListener('click', () => {
-  local.set('lw-gem-key', $('#rgKey').value.trim());
-  local.set('lw-gem-model', $('#rgModel').value.trim());
-  $('#rgMsg').textContent = LW.gemini.key() ? 'Saved on this device.' : 'Key removed.';
+  const key = $('#rgKey').value.trim(), model = $('#rgModel').value.trim();
+  local.set('lw-gem-key', key); local.set('lw-gem-model', model);
+  cfg().gemKey = key; cfg().gemModel = model;
+  LW.save();
+  $('#rgMsg').textContent = key ? 'Saved. Your other devices get it on their next sync.' : 'Key removed everywhere.';
   $('#fGemini').hidden = !LW.gemini.key();
   LW.refreshAsk();
 });
@@ -64,7 +68,7 @@ function mergeState(a, b) {
     Object.entries(bm.chal || {}).forEach(([k, v]) => { if (v) m.chal[k] = 1; });
   });
   out.drafts = Object.assign({}, b.drafts || {}, out.drafts || {});
-  if ((b.updated || 0) > (a.updated || 0)) { out.exams = clone(b.exams); out.contract = clone(b.contract); }
+  if ((b.updated || 0) > (a.updated || 0)) { out.exams = clone(b.exams); out.contract = clone(b.contract); if (b.cfg) out.cfg = clone(b.cfg); }
   out.updated = Math.max(a.updated || 0, b.updated || 0);
   return out;
 }
@@ -106,7 +110,7 @@ function renderRig() {
   $('#rcDrills').value = (S.contract || {}).drills ?? 1;
   $('#rcMissions').value = (S.contract || {}).missions ?? 1;
   $('#rgKey').value = LW.gemini.key();
-  $('#rgModel').value = local.get('lw-gem-model');
+  $('#rgModel').value = local.get('lw-gem-model') || cfg().gemModel || '';
   $('#sUrl').value = local.get('lw-sb-url'); $('#sKey').value = local.get('lw-sb-key'); $('#sEmail').value = local.get('lw-sb-email');
   $('#sSql').textContent = SQL;
   syncLabel();
@@ -211,6 +215,9 @@ async function syncNow(loud) {
     const up = await c.from('lonewolf_vault').upsert({ user_id: uid, state: LW.S, vault: LW.VAULT, updated_at: new Date().toISOString() });
     if (up.error) throw up.error;
     local.set('lw-lastsync', String(Date.now()));
+    // a synced Gemini key overrides an old one stored only on this device
+    if (LW.S.cfg && LW.S.cfg.gemKey !== undefined && local.get('lw-gem-key') !== LW.S.cfg.gemKey) { local.set('lw-gem-key', LW.S.cfg.gemKey); local.set('lw-gem-model', LW.S.cfg.gemModel || ''); }
+    $('#fGemini').hidden = !LW.gemini.key();
     syncLabel();
     dispatchEvent(new Event('lw-synced'));
     if (loud) LW.toast('Synced');
