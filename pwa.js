@@ -45,3 +45,6 @@
     }).catch(() => { ver.textContent = 'offline engine unavailable'; });
   }
 }
+
+// Make sure hidden buttons really stay hidden (CSS was overriding it)
+document.head.insertAdjacentHTML('beforeend', '<style>[hidden]{display:none!important}</style>');
