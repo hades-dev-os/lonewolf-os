@@ -3,6 +3,7 @@
 Hades's personal study rig. Offline-first PWA, hosted free on GitHub Pages.
 
 ## Tabs
+
 - **Intel**: mission cards for each topic
 - **Burner**: spaced-repetition flashcards
 - **Blackbook**: write code or definitions blind, then compare
@@ -13,11 +14,13 @@ Hades's personal study rig. Offline-first PWA, hosted free on GitHub Pages.
 - **Ask AI**: copies your context and opens Claude, Gemini, ChatGPT or Copilot
 
 ## Updating the app
+
 1. Edit files in VS Code.
 2. Bump `VERSION` in `sw.js`.
 3. Source Control: message, Commit, Sync Changes.
 
 ## Files
+
 - `index.html` layout and styles
 - `app.js` core (vault, modules, study tabs, Ask AI)
 - `forge.js` Forge tab
