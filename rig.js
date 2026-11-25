@@ -127,6 +127,7 @@ $('#rWipeAll').addEventListener('click', e => {
 function renderRig() {
   const S = LW.S;
   $('#rExams').innerHTML = LW.modules().map(m => `<label>${esc(m.code)} exam date<input class="inp" type="date" data-exam="${esc(m.id)}" value="${esc((S.exams || {})[m.id] || '')}"></label>`).join('') || '<p class="hint2">No modules yet.</p>';
+  document.querySelectorAll('#rExams input[data-exam]').forEach(i => { i.value = (S.exams || {})[i.dataset.exam] || ''; });
   $('#rcCards').value = (S.contract || {}).cards ?? 20;
   $('#rcDrills').value = (S.contract || {}).drills ?? 1;
   $('#rcMissions').value = (S.contract || {}).missions ?? 1;

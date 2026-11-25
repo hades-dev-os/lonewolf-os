@@ -12,7 +12,7 @@ const RANKS = [
   [0, 'Script Kiddie'], [150, 'Packet Sniffer'], [400, 'Code Breaker'],
   [800, 'Ghost Operator'], [1400, 'Black Hat'], [2200, 'Root'], [3200, 'Lone Wolf']
 ];
-const APP_VERSION = '2.2.0';
+const APP_VERSION = '2.3.0';
 
 // ============ vault: IndexedDB key-value storage ============
 const Vault = (() => {
@@ -101,7 +101,8 @@ function topbar() {
   if (ex) {
     const days = Math.ceil((new Date(ex + 'T09:00') - new Date()) / DAY);
     chip.hidden = false;
-    chip.textContent = days > 0 ? `${MOD.code} exam in ${days}d` : days === 0 ? `${MOD.code} exam TODAY` : `${MOD.code} exam done`;
+    chip.querySelector('.lng').textContent = days > 0 ? `${MOD.code} exam in ${days}d` : days === 0 ? `${MOD.code} exam TODAY` : `${MOD.code} exam done`;
+    chip.querySelector('.sht').textContent = days > 0 ? `⏱ ${days}d` : days === 0 ? '⏱ TODAY' : '✓';
     chip.className = 'pill' + (days <= 7 && days >= 0 ? ' red' : '');
   } else chip.hidden = true;
 }
@@ -126,16 +127,19 @@ function topbar() {
 })();
 
 // tabs + hash routing
-const VIEWS = ['intel', 'burner', 'blackbook', 'terminal', 'log', 'forge', 'rig'];
+const VIEWS = ['home', 'intel', 'burner', 'blackbook', 'terminal', 'log', 'forge', 'rig'];
 let VIEW = 'intel';
 const viewHooks = {};
 function go(v) {
-  if (!VIEWS.includes(v)) v = 'intel';
+  if (!VIEWS.includes(v)) v = 'home';
   VIEW = v;
+  if (v !== 'home' && MOD) { try { localStorage.setItem('lw-last', JSON.stringify({ mod: MOD.id, view: v })); } catch (e) {} }
+  Home.active(v === 'home');
   $$('.tab').forEach(t => t.setAttribute('aria-selected', t.dataset.v === v));
   $$('.view').forEach(s => s.classList.toggle('on', s.id === 'v-' + v));
   if (location.hash !== '#' + v) history.replaceState(null, '', '#' + v);
   if (viewHooks[v]) viewHooks[v]();
+  if (v === 'home') { renderHome(); return; }
   if (!MOD) return;
   if (v === 'blackbook' && dEd) setTimeout(() => dEd.refresh(), 30);
   if (v === 'terminal' && tEd) setTimeout(() => tEd.refresh(), 30);
@@ -718,6 +722,152 @@ async function loadModule(id) {
 }
 $('#modSel').addEventListener('change', e => loadModule(e.target.value));
 
+// ============ HOME ============
+const TAGS = [
+  'silence is the strongest firewall.',
+  'study in the dark. strike in the exam.',
+  'every node is a door. find the key.',
+  'no trace. no panic. full marks.',
+  'the pack sleeps. the wolf revises.',
+  'root access is earned, not given.',
+  'one more card. one more node. one more rank.'
+];
+const greet = () => { const h = new Date().getHours(); return h < 5 ? 'still online, Sir?' : h < 12 ? 'good morning, Sir.' : h < 18 ? 'good afternoon, Sir.' : 'good evening, Sir.'; };
+const Home = (() => {
+  let on = false, raf = 0, zapT = 0, tagT = 0, traces = [], packets = [], W = 0, H = 0, ctx = null;
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let seed = 7; const rnd = () => (seed = seed * 16807 % 2147483647) / 2147483647;
+  function layout() {
+    const c = $('#hNet'); if (!c) return;
+    const dpr = Math.min(2, devicePixelRatio || 1);
+    W = c.clientWidth; H = c.clientHeight;
+    c.width = W * dpr; c.height = H * dpr;
+    ctx = c.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    seed = 7; traces = []; packets = [];
+    const n = Math.max(8, Math.round(H / 46));
+    for (let i = 0; i < n; i++) {
+      let x = -20, y = rnd() * H; const pts = [[x, y]];
+      while (x < W + 20) {
+        x += 40 + rnd() * 140; pts.push([x, y]);
+        if (rnd() < .55) { const d = (rnd() < .5 ? -1 : 1) * (14 + rnd() * 30); x += Math.abs(d); y += d; pts.push([x, y]); }
+      }
+      const segs = []; let len = 0;
+      for (let k = 1; k < pts.length; k++) { const l = Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]); segs.push(l); len += l; }
+      traces.push({ pts, segs, len });
+      if (rnd() < .7) packets.push({ t: i, d: rnd() * len, v: 40 + rnd() * 90 });
+    }
+  }
+  function at(tr, d) {
+    for (let k = 0; k < tr.segs.length; k++) {
+      if (d <= tr.segs[k]) { const a = tr.pts[k], b = tr.pts[k + 1], f = d / tr.segs[k]; return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]; }
+      d -= tr.segs[k];
+    }
+    return tr.pts[tr.pts.length - 1];
+  }
+  let last = 0;
+  function frame(ts) {
+    if (!on || !ctx) return;
+    const dt = Math.min(.05, (ts - last) / 1000 || 0); last = ts;
+    ctx.clearRect(0, 0, W, H);
+    ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(138,151,159,.16)';
+    traces.forEach(tr => { ctx.beginPath(); tr.pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.stroke(); });
+    ctx.fillStyle = 'rgba(138,151,159,.3)';
+    traces.forEach(tr => { const e = tr.pts[tr.pts.length - 1]; ctx.beginPath(); ctx.arc(tr.pts[1][0], tr.pts[1][1], 2, 0, 7); ctx.fill(); });
+    packets.forEach(pk => {
+      const tr = traces[pk.t]; pk.d = (pk.d + pk.v * dt) % tr.len;
+      const [x, y] = at(tr, pk.d), [x2, y2] = at(tr, Math.max(0, pk.d - 26));
+      const g = ctx.createLinearGradient(x2, y2, x, y); g.addColorStop(0, 'rgba(61,255,154,0)'); g.addColorStop(1, 'rgba(61,255,154,.9)');
+      ctx.strokeStyle = g; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x2, y2); ctx.lineTo(x, y); ctx.stroke();
+      ctx.fillStyle = '#3dff9a'; ctx.beginPath(); ctx.arc(x, y, 2.2, 0, 7); ctx.fill();
+    });
+    raf = requestAnimationFrame(frame);
+  }
+  function zap() {
+    if (!on || reduce) return;
+    ['.hwolf', '.glitch'].forEach(sel => { const el = $(sel); if (!el) return; el.classList.remove('zap'); void el.offsetWidth; el.classList.add('zap'); });
+    zapT = setTimeout(zap, 2600 + Math.random() * 4200);
+  }
+  function typeTag() {
+    const el = $('#hTag'); if (!el) return;
+    const lines = ['> ' + greet(), ...TAGS.map(t => '> ' + t)];
+    let li = 0, ci = 0, del = false;
+    const step = () => {
+      if (!on) return;
+      const txt = lines[li];
+      if (!del) { ci++; el.textContent = txt.slice(0, ci); if (ci >= txt.length) { del = true; tagT = setTimeout(step, 2600); return; } }
+      else { ci -= 2; el.textContent = txt.slice(0, Math.max(2, ci)); if (ci <= 2) { del = false; li = li === 0 ? 1 + Math.floor(Math.random() * TAGS.length) : 1 + (li % TAGS.length); } }
+      tagT = setTimeout(step, del ? 18 : 42);
+    };
+    if (reduce) { el.textContent = lines[0]; return; }
+    step();
+  }
+  addEventListener('resize', () => { if (on) layout(); });
+  document.addEventListener('visibilitychange', () => { if (!on) return; if (document.hidden) cancelAnimationFrame(raf); else { last = performance.now(); raf = requestAnimationFrame(frame); } });
+  return {
+    active(v) {
+      if (v === on) return;
+      on = v;
+      clearTimeout(zapT); clearTimeout(tagT); cancelAnimationFrame(raf);
+      if (on) {
+        requestAnimationFrame(() => { layout(); last = performance.now(); if (!reduce) raf = requestAnimationFrame(frame); else frame(last); });
+        zapT = setTimeout(zap, 900); typeTag();
+      }
+    }
+  };
+})();
+
+async function renderHome() {
+  const [base, rname, next] = rankOf(S.xp);
+  const pct = next ? Math.min(100, (S.xp - base) / (next[0] - base) * 100) : 100;
+  const d = S.days[today()] || {}, c = S.contract || {};
+  const ctTotal = (c.cards || 0) + (c.drills || 0) + (c.missions || 0);
+  const ctDone = Math.min(d.cards || 0, c.cards || 0) + Math.min(d.drills || 0, c.drills || 0) + Math.min(d.missions || 0, c.missions || 0);
+  let lastSync = 0; try { lastSync = +localStorage.getItem('lw-lastsync') || 0; } catch (e) {}
+  $('#hStat').innerHTML =
+    `<span>operator <b>HADES</b></span><span>rank <b>${esc(rname)}</b></span>` +
+    `<span><span class="xb"><i style="width:${pct}%"></i></span> <b>${S.xp}</b> XP</span>` +
+    `<span>streak <b>${streak()}d</b></span>` +
+    (ctTotal ? `<span>contract <b>${ctDone}/${ctTotal}</b>${S.contractPaid[today()] ? ' ✓' : ''}</span>` : '') +
+    `<span>${navigator.onLine ? (lastSync ? 'synced <b>' + new Date(lastSync).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + '</b>' : 'online') : '<b>offline mode</b>'}</span>`;
+  let last = null; try { last = JSON.parse(localStorage.getItem('lw-last') || 'null'); } catch (e) {}
+  const lastMod = last && MODS.find(m => m.id === last.mod);
+  const VNAME = { intel: 'Intel', burner: 'Burner', blackbook: 'Blackbook', terminal: 'Terminal', log: 'Breach log', forge: 'Forge', rig: 'Rig' };
+  $('#hActs').innerHTML =
+    (lastMod ? `<button class="btn go" data-act="resume">▶ Resume · ${esc(lastMod.code)} ${esc(VNAME[last.view] || '')}</button>` : '') +
+    `<button class="btn" data-act="burn">Burn due cards</button><button class="btn" data-act="log">Daily contract</button><button class="btn" data-act="forge">Forge</button>`;
+  // module targets
+  const box = $('#hTargets');
+  const mods = registry();
+  const cards = await Promise.all(mods.map(async m => {
+    let mod; try { mod = await getModule(m.id); } catch (e) { return ''; }
+    const st = S.mods[m.id] || { nodes: {}, cards: {} };
+    const hacked = mod.nodes.filter(n => (st.nodes[n.id] || {}).hacked).length;
+    const due = mod.cards.filter(k => !(st.cards || {})[k.id] || st.cards[k.id].d <= Date.now()).length;
+    const ex = S.exams && S.exams[m.id];
+    const days = ex ? Math.ceil((new Date(ex + 'T09:00') - new Date()) / DAY) : null;
+    const prog = mod.nodes.length ? Math.round(hacked / mod.nodes.length * 100) : 0;
+    return `<button class="tgt" data-mod="${esc(m.id)}"><div class="tc"><b>${esc(m.code)}</b>${days != null ? `<span class="pill${days <= 7 && days >= 0 ? ' red' : ''}">${days > 0 ? 'exam ' + days + 'd' : days === 0 ? 'exam TODAY' : 'done'}</span>` : ''}</div>` +
+      `<span class="tn">${esc(m.name)}</span><div class="meter" title="${prog}% hacked"><i style="width:${prog}%"></i></div>` +
+      `<div class="tm"><span>${hacked}/${mod.nodes.length} nodes</span><span>${due} cards due</span></div></button>`;
+  }));
+  box.innerHTML = cards.join('') + '<button class="tgt add" data-act="forge">＋ Forge a new module</button>';
+}
+$('#hActs').addEventListener('click', async e => {
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  const a = b.dataset.act;
+  if (a === 'resume') { let l = null; try { l = JSON.parse(localStorage.getItem('lw-last')); } catch (er) {} if (l) { if (!MOD || MOD.id !== l.mod) await loadModule(l.mod); go(l.view); } }
+  if (a === 'burn') { cardFilter = 'due'; go('burner'); }
+  if (a === 'log') go('log');
+  if (a === 'forge') go('forge');
+});
+$('#hTargets').addEventListener('click', async e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.act === 'forge') return go('forge');
+  if (b.dataset.mod) { if (!MOD || MOD.id !== b.dataset.mod) await loadModule(b.dataset.mod); go('intel'); }
+});
+$('#brandBtn').addEventListener('click', () => go('home'));
+$('#brandBtn').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go('home'); } });
+
 // ============ public API for forge.js / rig.js ============
 window.LW = {
   version: APP_VERSION,
@@ -778,7 +928,7 @@ window.LW = {
   if (MODS.length) await loadModule($('#modSel').value);
   else $('#nodeCard').innerHTML = '<div class="empty">No modules yet. Open the Forge to build your first one.</div>';
   ready = true;
-  if (!location.hash.startsWith('#link-')) go(location.hash.slice(1) || 'intel');
+  if (!location.hash.startsWith('#link-')) go('home'); // every fresh launch opens on Home
   emit('ready');
 })();
 }
