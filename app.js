@@ -12,7 +12,7 @@ const RANKS = [
   [0, 'Script Kiddie'], [150, 'Packet Sniffer'], [400, 'Code Breaker'],
   [800, 'Ghost Operator'], [1400, 'Black Hat'], [2200, 'Root'], [3200, 'Lone Wolf']
 ];
-const APP_VERSION = '2.4.0';
+const APP_VERSION = '2.5.0';
 
 // ============ vault: IndexedDB key-value storage ============
 const Vault = (() => {
@@ -154,7 +154,7 @@ function topbar() {
 })();
 
 // tabs + hash routing
-const VIEWS = ['home', 'intel', 'burner', 'blackbook', 'terminal', 'log', 'forge', 'rig'];
+const VIEWS = ['home', 'net', 'op', 'intel', 'burner', 'blackbook', 'terminal', 'log', 'forge', 'rig'];
 let VIEW = 'intel', VIEW_PREV = null;
 const viewHooks = {};
 function go(v) {
@@ -162,7 +162,7 @@ function go(v) {
   VIEW = v;
   if (ready && v !== VIEW_PREV) window.SFX && SFX.play('nav');
   VIEW_PREV = v;
-  if (v !== 'home' && MOD) { try { localStorage.setItem('lw-last', JSON.stringify({ mod: MOD.id, view: v })); } catch (e) {} }
+  if (!['home', 'net', 'op', 'forge', 'rig'].includes(v) && MOD) { try { localStorage.setItem('lw-last', JSON.stringify({ mod: MOD.id, view: v })); } catch (e) {} }
   Home.active(v === 'home');
   $$('.tab').forEach(t => t.setAttribute('aria-selected', t.dataset.v === v));
   $$('.view').forEach(s => s.classList.toggle('on', s.id === 'v-' + v));
@@ -942,7 +942,13 @@ window.LW = {
   async wipeAll() { await Vault.del('state'); await Vault.del('vault'); try { localStorage.removeItem('lonewolf-v1'); } catch (e) {} location.reload(); },
   refreshAsk,
   renderLog: () => MOD && renderLog(),
-  topbar
+  topbar,
+  // used by ops.js (Network update)
+  bump: k => { bump(k); save(); },
+  rankOf, RANKS, today, streak, compare, DAY,
+  loadModule,
+  openNode: id => { go('intel'); openNode(id); },
+  burn: async id => { if (id && (!MOD || MOD.id !== id)) await loadModule(id); cardFilter = 'due'; go('burner'); }
 };
 
 // ============ start ============

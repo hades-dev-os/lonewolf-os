@@ -12,6 +12,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Michroma&family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="libs/cm/codemirror.css">
+<link rel="stylesheet" href="ops.css">
 <style>
 /* VOICE everyday study tool with the swagger of a hacker's rig; quiet when reading, loud when you win
    IDEA a lone-wolf operator's terminal: his own wolf-circuit emblem, node map, burner phone, black notebook
@@ -342,6 +343,7 @@ h2{font:500 18px/1.3 var(--mono);margin:0}
 
   <nav class="rail" role="tablist" aria-label="Modules">
     <button class="tab" role="tab" data-v="home"><svg viewBox="0 0 200 200" style="stroke-width:12"><use href="#wolf"/></svg><span>Home<small>base</small></span></button>
+    <button class="tab" role="tab" data-v="net"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="8.5" stroke-dasharray="5 2"/><path d="M12 3.5V1M20.5 12H23M12 20.5V23M3.5 12H1"/></svg><span>Network<small>every tool, one hub</small></span></button>
     <button class="tab" role="tab" data-v="intel"><svg viewBox="0 0 24 24"><path d="M4 4h12l4 4v12H4z"/><path d="M8 11h8M8 15h8M8 7h5"/></svg><span>Intel<small>mission cards</small></span></button>
     <button class="tab" role="tab" data-v="burner"><svg viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="2"/><path d="M10 18h4"/></svg><span>Burner<small>flashcards</small></span></button>
     <button class="tab" role="tab" data-v="blackbook"><svg viewBox="0 0 24 24"><path d="M5 3h12a2 2 0 0 1 2 2v16H7a2 2 0 0 1-2-2z"/><path d="M5 17a2 2 0 0 1 2-2h12"/><path d="M9 7h6"/></svg><span>Blackbook<small>write it blind</small></span></button>
@@ -369,10 +371,14 @@ h2{font:500 18px/1.3 var(--mono);margin:0}
             <div class="hacts" id="hActs"></div>
           </div>
         </div>
+        <div id="hOps"></div>
         <div class="hsec"><h2>Targets</h2><span class="hint2">Tap a module to breach it.</span></div>
         <div class="targets" id="hTargets"></div>
       </div>
     </section>
+
+    <section class="view" id="v-net"><div id="netHub"></div></section>
+    <section class="view" id="v-op"><div class="ophead"><button class="btn sm" id="opBack">◂ Network</button><h1 id="opTitle"></h1><span class="hint2" id="opSub"></span></div><div id="opBody"></div></section>
 
     <section class="view" id="v-intel">
       <div class="intel">
@@ -570,6 +576,7 @@ h2{font:500 18px/1.3 var(--mono);margin:0}
 </aside>
 
 <div class="toast" id="toast" role="status"></div>
+<div class="saver" id="saver" hidden><canvas id="svNet"></canvas><div class="svc"><svg viewBox="0 0 200 200" class="svw"><use href="#wolf"/></svg><div class="svt" id="svTime"></div><div class="svd" id="svDate"></div><div class="svf" id="svFocus"></div><div class="svtip" id="svTip"></div><small>tap anywhere to return</small></div></div>
 
 <div class="boot" id="boot">
   <div class="in">
@@ -591,6 +598,7 @@ h2{font:500 18px/1.3 var(--mono);margin:0}
 <script src="app.js"></script>
 <script src="forge.js"></script>
 <script src="rig.js"></script>
+<script src="ops.js"></script>
 <script src="pwa.js"></script>
 </body>
 </html>

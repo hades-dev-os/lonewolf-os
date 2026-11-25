@@ -91,6 +91,7 @@ function mergeState(a, b) {
   if ((tb.cfg || 0) > (ta.cfg || 0)) { out.cfg = clone(b.cfg); out.stamps.cfg = tb.cfg; }
   else { out.cfg = Object.assign({}, b.cfg || {}, a.cfg || {}); }
   out.updated = Math.max(a.updated || 0, b.updated || 0);
+  if (window.LW && LW.mergeOps) LW.mergeOps(out, a, b); // Network update data (tracks, tasks, journal...)
   return out;
 }
 function mergeVault(a, b, state) {
