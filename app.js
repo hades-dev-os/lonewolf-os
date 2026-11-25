@@ -12,7 +12,7 @@ const RANKS = [
   [0, 'Script Kiddie'], [150, 'Packet Sniffer'], [400, 'Code Breaker'],
   [800, 'Ghost Operator'], [1400, 'Black Hat'], [2200, 'Root'], [3200, 'Lone Wolf']
 ];
-const APP_VERSION = '2.3.0';
+const APP_VERSION = '2.4.0';
 
 // ============ vault: IndexedDB key-value storage ============
 const Vault = (() => {
@@ -81,7 +81,7 @@ function addXP(n, msg, bad) {
   S.xp = Math.max(0, S.xp + n);
   const after = rankOf(S.xp)[1];
   if (msg) toast(msg + (n ? ` ${n > 0 ? '+' : ''}${n} XP` : ''), bad);
-  if (after !== before && n > 0) setTimeout(() => toast('RANK UP // ' + after), 1600);
+  if (after !== before && n > 0) setTimeout(() => { toast('RANK UP // ' + after); window.SFX && SFX.play('rankup'); }, 1600);
 }
 function rankOf(xp) { let r = RANKS[0], next = null; for (let i = 0; i < RANKS.length; i++) { if (xp >= RANKS[i][0]) { r = RANKS[i]; next = RANKS[i + 1] || null; } } return [r[0], r[1], next]; }
 
@@ -107,32 +107,61 @@ function topbar() {
   } else chip.hidden = true;
 }
 
-// boot sequence
+// boot sequence: glitch + satellite uplink (plays on every fresh launch)
 (() => {
   const boot = $('#boot');
-  let seen = false; try { seen = sessionStorage.getItem('lw-boot') === '1'; } catch (e) {}
-  if (seen || matchMedia('(prefers-reduced-motion: reduce)').matches) { boot.remove(); return; }
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) { boot.remove(); return; }
   const lines = [
-    '> establishing secure uplink ........ <span class="g">OK</span>',
-    '> loading operator profile: HADES ... <span class="g">OK</span>',
-    '> mounting vault .................... <span class="g">OK</span>',
-    '> forge online · burner synced',
-    '> ask-ai relay on standby',
-    '<span class="g">> access granted. welcome back, Sir.</span>'
+    ['> relay satellite', 'LW-SAT/7 FOUND'],
+    ['> handshake 2400 baud', 'LOCKED'],
+    ['> operator HADES', 'VERIFIED'],
+    ['> mounting vault', 'DECRYPTED'],
+    ['> forge · burner · blackbook', 'online'],
+    ['> access granted.', 'welcome back, Sir.']
   ];
-  let i = 0; const log = $('#bootLog');
-  const tick = setInterval(() => { log.innerHTML += lines[i] + '\n'; if (++i >= lines.length) { clearInterval(tick); setTimeout(close, 650); } }, 300);
-  function close() { clearInterval(tick); boot.style.transition = 'opacity .35s'; boot.style.opacity = 0; setTimeout(() => boot.remove(), 360); try { sessionStorage.setItem('lw-boot', '1'); } catch (e) {} }
-  boot.addEventListener('click', close);
+  const glyph = '#$%&*+<>/\\|=?01';
+  const scramble = (el, txt, done) => {
+    let i = 0; const t = setInterval(() => {
+      i += 2; el.textContent = txt.slice(0, i) + Array.from({ length: Math.max(0, Math.min(8, txt.length - i)) }, () => glyph[Math.random() * glyph.length | 0]).join('');
+      if (i % 4 === 0) window.SFX && SFX.play('type');
+      if (i >= txt.length) { clearInterval(t); el.textContent = txt; done && done(); }
+    }, 22);
+  };
+  const zapB = () => ['#bootWolf', '#bootTitle'].forEach(s => { const el = $(s); if (!el) return; el.classList.remove('zap'); void el.offsetWidth; el.classList.add('zap'); });
+  let closed = false, k = 0;
+  const log = $('#bootLog');
+  // sound: plays if the browser allows it (installed apps usually do); otherwise silent
+  try { window.SFX && SFX.ac(); } catch (e) {}
+  setTimeout(() => { if (window.SFX && SFX.unlocked()) SFX.play('uplink'); }, 120);
+  setTimeout(zapB, 250);
+  function next() {
+    if (closed) return;
+    if (k >= lines.length) { setTimeout(close, 650); return; }
+    const pct = Math.round((k + 1) / lines.length * 100);
+    $('#upBar').style.width = pct + '%'; $('#upTxt').textContent = 'UPLINK ' + pct + '%';
+    const row = document.createElement('div'); log.append(row);
+    const [a, b] = lines[k];
+    const isLast = k === lines.length - 1;
+    scramble(row, a + '  ', () => { const sp = document.createElement('span'); sp.className = 'g'; row.append(sp); scramble(sp, b, () => { k++; if (Math.random() < .5) { zapB(); boot.classList.remove('flick'); void boot.offsetWidth; boot.classList.add('flick'); } setTimeout(next, isLast ? 150 : 90); }); });
+  }
+  setTimeout(next, 350);
+  function close() {
+    if (closed) return; closed = true;
+    zapB(); window.SFX && SFX.play('glitch');
+    boot.style.transition = 'opacity .35s'; boot.style.opacity = 0; setTimeout(() => boot.remove(), 360);
+  }
+  boot.addEventListener('click', () => { if (window.SFX && !SFX.unlocked()) { SFX.ac(); } close(); });
 })();
 
 // tabs + hash routing
 const VIEWS = ['home', 'intel', 'burner', 'blackbook', 'terminal', 'log', 'forge', 'rig'];
-let VIEW = 'intel';
+let VIEW = 'intel', VIEW_PREV = null;
 const viewHooks = {};
 function go(v) {
   if (!VIEWS.includes(v)) v = 'home';
   VIEW = v;
+  if (ready && v !== VIEW_PREV) window.SFX && SFX.play('nav');
+  VIEW_PREV = v;
   if (v !== 'home' && MOD) { try { localStorage.setItem('lw-last', JSON.stringify({ mod: MOD.id, view: v })); } catch (e) {} }
   Home.active(v === 'home');
   $$('.tab').forEach(t => t.setAttribute('aria-selected', t.dataset.v === v));
@@ -211,6 +240,7 @@ $('#nodeCard').addEventListener('click', async e => {
   if (t.id === 'hackBtn') {
     const st = M().nodes[NODE];
     st.hacked = !st.hacked;
+    if (st.hacked) window.SFX && SFX.play('granted');
     if (st.hacked && !st.hackedOnce) { st.hackedOnce = 1; addXP(25, 'NODE HACKED'); bump('hack'); } else toast(st.hacked ? 'Node hacked' : 'Node unmarked');
     save(); openNode(NODE);
   } else if (t.id === 'burnBtn') { cardFilter = NODE; $('#cardFilter').value = NODE; go('burner'); }
@@ -272,7 +302,7 @@ function renderBurner(next) {
   $('#sMast').textContent = boxes[4]; $('#sToday').textContent = (S.days[today()] || {}).cards || 0;
   $('#dueTxt').textContent = cardPool().length + ' in this deck';
 }
-function flip() { if (!curCard) return; flipped = !flipped; $('#flip').classList.toggle('show', flipped); }
+function flip() { if (!curCard) return; flipped = !flipped; $('#flip').classList.toggle('show', flipped); window.SFX && SFX.play('flip'); }
 function verdict(pass) {
   if (!curCard) return;
   const cs = M().cards, st = cs[curCard.id] || { b: 1, d: 0 };
@@ -281,6 +311,7 @@ function verdict(pass) {
   st.t = Date.now();
   cs[curCard.id] = st;
   bump('card');
+  window.SFX && SFX.play(pass ? 'granted' : 'denied');
   addXP(pass ? 5 : 1, pass ? 'ACCESS GRANTED' : 'TRACE DETECTED', !pass);
   save(); renderBurner(true);
 }
@@ -354,6 +385,7 @@ $('#dCheck').addEventListener('click', () => {
     if (r.pct >= 90 && !(prev >= 90)) gain += 30;
   }
   bump('drill');
+  window.SFX && SFX.play(r.pct >= 90 ? 'breach' : r.pct >= 60 ? 'granted' : 'denied');
   if (gain) addXP(gain, r.pct >= 90 ? 'BLACKBOOK CRACKED' : 'Progress logged'); else toast(r.pct >= 90 ? 'Clean run' : 'Trace detected: keep drilling', r.pct < 90);
   S.drafts[MOD.id + ':' + DRILL.id] = dEd.getValue(); save();
   $('#dResult').innerHTML =
@@ -507,6 +539,7 @@ async function run() {
   if (!rt) { out.innerHTML = `<span class="m">// ${esc(runtimeNote(lang))}</span>`; if (CH && CH.expect) { const ex = document.createElement('span'); ex.className = 'm'; ex.textContent = '\nexpected output:\n' + CH.expect; out.append(ex); } return; }
   const code = tEd.getValue();
   $('#tRun').disabled = true;
+  window.SFX && SFX.play('run');
   try {
     if (!rt.inst) out.innerHTML = `<span class="m">// loading ${rt.label} runtime (${rt.size}, first run only)…</span>`;
     await rt.load();
@@ -524,9 +557,11 @@ async function run() {
         const v = document.createElement('div'); v.style.marginTop = '10px';
         if (okRun) {
           v.innerHTML = '<span class="p">> ACCESS GRANTED · output matches</span>';
+          window.SFX && SFX.play('breach');
           if (!M().chal[CH.id]) { M().chal[CH.id] = 1; bump('mission'); addXP(40, 'NODE BREACHED'); } else toast('Clean run');
         } else {
           v.innerHTML = '<span class="e">> TRACE DETECTED · output differs</span>\n<span class="m">expected:</span>\n';
+          window.SFX && SFX.play('denied');
           const ex = document.createElement('span'); ex.className = 'm'; ex.textContent = expect; v.append(ex);
         }
         out.append(v);
@@ -784,7 +819,8 @@ const Home = (() => {
   }
   function zap() {
     if (!on || reduce) return;
-    ['.hwolf', '.glitch'].forEach(sel => { const el = $(sel); if (!el) return; el.classList.remove('zap'); void el.offsetWidth; el.classList.add('zap'); });
+    if (window.SFX && SFX.unlocked() && Math.random() < .6) SFX.play('glitch');
+    ['#v-home .hwolf', '#v-home .glitch'].forEach(sel => { const el = $(sel); if (!el) return; el.classList.remove('zap'); void el.offsetWidth; el.classList.add('zap'); });
     zapT = setTimeout(zap, 2600 + Math.random() * 4200);
   }
   function typeTag() {

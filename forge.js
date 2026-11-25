@@ -122,6 +122,7 @@ $('#fPreview').addEventListener('click', async e => {
   if (e.target.id === 'fDeploy' && PENDING) {
     const mod = merged(PENDING, EXIST);
     await LW.putModule(mod);
+    window.SFX && SFX.play('deploy');
     LW.addXP(20, `${mod.code} DEPLOYED`);
     LW.save();
     PENDING = null;

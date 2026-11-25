@@ -269,7 +269,7 @@ async function syncNow(loud) {
     $('#fGemini').hidden = !LW.gemini.key();
     syncLabel();
     dispatchEvent(new Event('lw-synced'));
-    if (loud) LW.toast('Synced');
+    if (loud) { LW.toast('Synced'); window.SFX && SFX.play('sync'); }
   } catch (e) {
     applying = false;
     syncLabel('✕ Sync failed: ' + (e.message || e) + (/relation|does not exist/i.test(e.message || '') ? ' (run the SQL setup)' : ''));
@@ -294,6 +294,13 @@ LW.on('ready', () => {
   if (local.get('lw-sb-on')) setTimeout(syncNow, 1200);
   try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (e) {}
 });
-LW.onView('rig', renderRig);
+// sound settings (per device)
+$('#sfxOn').addEventListener('change', e => { SFX.set({ on: e.target.checked }); if (e.target.checked) SFX.play('granted'); });
+$('#sfxVol').addEventListener('input', e => SFX.set({ vol: +e.target.value }));
+$('#sfxVol').addEventListener('change', () => SFX.play('tick'));
+document.querySelectorAll('[data-sfx]').forEach(b => b.addEventListener('click', () => { SFX.ac(); SFX.play(b.dataset.sfx); }));
+function renderSfx() { $('#sfxOn').checked = SFX.on; $('#sfxVol').value = SFX.volume(); }
+LW.on('ready', renderSfx);
+LW.onView('rig', () => { renderRig(); renderSfx(); });
 LW.sync = { now: syncNow, mergeState, mergeVault };
 }

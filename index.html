@@ -263,6 +263,14 @@ h2{font:500 18px/1.3 var(--mono);margin:0}
 #examChip .lng{display:none}#examChip .sht{display:inline}
 .hbtn{padding:7px 9px}
 }
+/* boot glitch */
+.boot .bwolf{width:130px;margin:0 auto 18px}
+.boot .glitch{font-size:clamp(26px,6vw,40px);text-align:center;letter-spacing:.18em;margin-bottom:16px}
+.uplink{display:flex;align-items:center;gap:12px;font:12px var(--mono);color:var(--go);margin-bottom:14px}
+.uplink .ub{flex:1;height:4px;background:var(--line);border-radius:2px;overflow:hidden}
+.uplink .ub i{display:block;height:100%;width:0;background:var(--go);box-shadow:0 0 10px var(--go);transition:width .18s}
+.boot.flick{animation:flick .12s steps(2) 2}
+@keyframes flick{50%{opacity:.55;transform:translateX(3px)}}
 .toast{position:fixed;left:50%;bottom:28px;transform:translate(-50%,30px);opacity:0;z-index:60;padding:12px 18px;border-radius:9px;font:13px var(--mono);border:1px solid var(--go2);background:#07140d;color:var(--go);transition:.25s;pointer-events:none;white-space:nowrap}
 .toast.on{opacity:1;transform:translate(-50%,0)}
 .toast.bad{border-color:#5a1d26;background:#16070a;color:var(--red)}
@@ -512,6 +520,13 @@ h2{font:500 18px/1.3 var(--mono);margin:0}
             <div class="row"><button class="btn" id="rgSave">Save key</button><button class="btn" id="rgTest">Test</button><span class="hint2" id="rgMsg"></span></div>
           </div>
           <div class="panel fbox">
+            <h2>Sound</h2>
+            <p class="hint2">Original synthesized effects: uplink, access granted, trace detected, breach, glitch.</p>
+            <div class="row"><label class="row" style="gap:8px;font-size:14px"><input type="checkbox" id="sfxOn" style="width:20px;height:20px;accent-color:var(--go)"> Sound on</label>
+            <input type="range" id="sfxVol" min="0" max="1" step="0.05" style="flex:1;min-width:120px;accent-color:var(--go)" aria-label="Volume"></div>
+            <div class="row"><button class="btn sm" data-sfx="uplink">Uplink</button><button class="btn sm" data-sfx="granted">Access granted</button><button class="btn sm" data-sfx="denied">Trace detected</button><button class="btn sm" data-sfx="breach">Breach</button><button class="btn sm" data-sfx="glitch">Glitch</button><button class="btn sm" data-sfx="rankup">Rank up</button></div>
+          </div>
+          <div class="panel fbox">
             <h2>Backup</h2>
             <p class="hint2">One file with your progress and every vault module. Use it to move progress between devices without sync.</p>
             <div class="row"><button class="btn go" id="rBackup">Export backup</button><label class="btn" for="rRestore">Restore backup</label><input type="file" id="rRestore" accept=".json" hidden></div>
@@ -558,13 +573,19 @@ h2{font:500 18px/1.3 var(--mono);margin:0}
 
 <div class="boot" id="boot">
   <div class="in">
-    <svg viewBox="0 0 200 200" style="color:#e6ebee"><g class="draw"><use href="#wolf"/></g></svg>
-    <h1>LONEWOLF OS</h1>
+    <div class="hwolf bwolf" id="bootWolf" aria-hidden="true">
+      <svg viewBox="0 0 200 200" class="w r"><use href="#wolf"/></svg>
+      <svg viewBox="0 0 200 200" class="w g"><use href="#wolf"/></svg>
+      <svg viewBox="0 0 200 200" class="w main"><g class="draw"><use href="#wolf"/></g></svg>
+    </div>
+    <h1 class="glitch" id="bootTitle" data-t="LONEWOLF OS">LONEWOLF OS</h1>
+    <div class="uplink"><span id="upTxt">UPLINK 0%</span><span class="ub"><i id="upBar"></i></span></div>
     <pre id="bootLog"></pre>
-    <div class="skip">click to skip</div>
+    <div class="skip" id="bootSkip">tap to skip</div>
   </div>
 </div>
 
+<script src="sfx.js"></script>
 <script src="libs/marked.min.js"></script>
 <script src="libs/cm/codemirror-bundle.js"></script>
 <script src="app.js"></script>
