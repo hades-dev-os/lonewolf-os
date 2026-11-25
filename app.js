@@ -12,7 +12,7 @@ const RANKS = [
   [0, 'Script Kiddie'], [150, 'Packet Sniffer'], [400, 'Code Breaker'],
   [800, 'Ghost Operator'], [1400, 'Black Hat'], [2200, 'Root'], [3200, 'Lone Wolf']
 ];
-const APP_VERSION = '2.1.0';
+const APP_VERSION = '2.2.0';
 
 // ============ vault: IndexedDB key-value storage ============
 const Vault = (() => {
@@ -143,7 +143,7 @@ function go(v) {
   if (v === 'burner') renderBurner();
 }
 $$('.tab').forEach(t => t.addEventListener('click', () => go(t.dataset.v)));
-addEventListener('hashchange', () => go(location.hash.slice(1)));
+addEventListener('hashchange', () => { if (!location.hash.startsWith('#link-')) go(location.hash.slice(1)); });
 
 // ============ code rendering ============
 const CM_MODES = { php: 'application/x-httpd-php', sql: 'text/x-sql', python: 'text/x-python', java: 'text/x-java', csharp: 'text/x-csharp', javascript: 'text/javascript', js: 'text/javascript', html: 'text/html', css: 'text/css', c: 'text/x-csrc', cpp: 'text/x-c++src' };
@@ -778,7 +778,7 @@ window.LW = {
   if (MODS.length) await loadModule($('#modSel').value);
   else $('#nodeCard').innerHTML = '<div class="empty">No modules yet. Open the Forge to build your first one.</div>';
   ready = true;
-  go(location.hash.slice(1) || 'intel');
+  if (!location.hash.startsWith('#link-')) go(location.hash.slice(1) || 'intel');
   emit('ready');
 })();
 }

@@ -13,17 +13,24 @@ const clone = o => JSON.parse(JSON.stringify(o || {}));
 const cfg = () => (LW.S.cfg ||= {});
 LW.gemini = {
   key: () => local.get('lw-gem-key') || cfg().gemKey || '',
-  model: () => local.get('lw-gem-model') || cfg().gemModel || 'gemini-2.5-flash',
+  model: () => local.get('lw-gem-model') || cfg().gemModel || 'gemini-3.8-flash',
   async ask(prompt, json) {
     const key = this.key();
     if (!key) throw new Error('no API key set in Rig');
     if (!navigator.onLine) throw new Error('offline');
     const body = { contents: [{ role: 'user', parts: [{ text: prompt }] }] };
     if (json) body.generationConfig = { responseMimeType: 'application/json', maxOutputTokens: 32768 };
-    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.model())}:generateContent`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(body)
-    });
-    const data = await r.json().catch(() => ({}));
+    // retry automatically when Google is busy (429 / 503 / "high demand")
+    let r, data;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.model())}:generateContent`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(body)
+      });
+      data = await r.json().catch(() => ({}));
+      const busy = r.status === 429 || r.status === 503 || /high demand|overloaded|try again/i.test((data.error && data.error.message) || '');
+      if (r.ok || !busy || attempt === 2) break;
+      await new Promise(res => setTimeout(res, [2500, 6000][attempt]));
+    }
     if (!r.ok) throw new Error((data.error && data.error.message) || ('HTTP ' + r.status));
     const c = data.candidates && data.candidates[0];
     const text = c && c.content && c.content.parts ? c.content.parts.map(p => p.text || '').join('') : '';
@@ -35,6 +42,7 @@ $('#rgSave').addEventListener('click', () => {
   const key = $('#rgKey').value.trim(), model = $('#rgModel').value.trim();
   local.set('lw-gem-key', key); local.set('lw-gem-model', model);
   cfg().gemKey = key; cfg().gemModel = model;
+  (LW.S.stamps ||= {}).cfg = Date.now();
   LW.save();
   $('#rgMsg').textContent = key ? 'Saved. Your other devices get it on their next sync.' : 'Key removed everywhere.';
   $('#fGemini').hidden = !LW.gemini.key();
@@ -68,7 +76,20 @@ function mergeState(a, b) {
     Object.entries(bm.chal || {}).forEach(([k, v]) => { if (v) m.chal[k] = 1; });
   });
   out.drafts = Object.assign({}, b.drafts || {}, out.drafts || {});
-  if ((b.updated || 0) > (a.updated || 0)) { out.exams = clone(b.exams); out.contract = clone(b.contract); if (b.cfg) out.cfg = clone(b.cfg); }
+  // settings: each one carries its own edit time, newest edit wins
+  const ta = a.stamps || {}, tb = b.stamps || {};
+  out.stamps = Object.assign({}, ta);
+  out.exams = clone(a.exams);
+  new Set([...Object.keys(a.exams || {}), ...Object.keys(b.exams || {})]).forEach(id => {
+    const ka = ta['exam:' + id] || 0, kb = tb['exam:' + id] || 0;
+    if (kb > ka || (kb === ka && !(a.exams || {})[id] && (b.exams || {})[id])) {
+      if ((b.exams || {})[id]) out.exams[id] = b.exams[id]; else delete out.exams[id];
+      out.stamps['exam:' + id] = kb;
+    }
+  });
+  if ((tb.contract || 0) > (ta.contract || 0)) { out.contract = clone(b.contract); out.stamps.contract = tb.contract; }
+  if ((tb.cfg || 0) > (ta.cfg || 0)) { out.cfg = clone(b.cfg); out.stamps.cfg = tb.cfg; }
+  else { out.cfg = Object.assign({}, b.cfg || {}, a.cfg || {}); }
   out.updated = Math.max(a.updated || 0, b.updated || 0);
   return out;
 }
@@ -120,10 +141,12 @@ $('#rExams').addEventListener('change', e => {
   const id = e.target.dataset.exam; if (!id) return;
   LW.S.exams = LW.S.exams || {};
   if (e.target.value) LW.S.exams[id] = e.target.value; else delete LW.S.exams[id];
+  (LW.S.stamps ||= {})['exam:' + id] = Date.now();
   LW.save(); LW.topbar(); LW.toast('Exam date saved');
 });
 ['rcCards', 'rcDrills', 'rcMissions'].forEach(id => $('#' + id).addEventListener('change', () => {
   LW.S.contract = { cards: Math.max(0, +$('#rcCards').value || 0), drills: Math.max(0, +$('#rcDrills').value || 0), missions: Math.max(0, +$('#rcMissions').value || 0) };
+  (LW.S.stamps ||= {}).contract = Date.now();
   LW.save(); LW.toast('Contract updated');
 }));
 async function about() {
@@ -188,11 +211,36 @@ $('#sSignIn').addEventListener('click', async () => {
     syncLabel(); await syncNow();
   } catch (e) { syncLabel('✕ ' + (e.message || e)); }
 });
+$('#sPass').addEventListener('keydown', e => { if (e.key === 'Enter') $('#sSignIn').click(); });
 $('#sOut').addEventListener('click', async () => {
   try { const c = await client(); if (c) await c.auth.signOut(); } catch (e) {}
   local.set('lw-sb-on', ''); syncLabel(); LW.toast('Signed out. Progress stays on this device.');
 });
 $('#sNow').addEventListener('click', () => syncNow(true));
+
+// ---------- Link a device: one link carries URL + key + email (never the password) ----------
+$('#sLink').addEventListener('click', async () => {
+  const url = local.get('lw-sb-url'), key = local.get('lw-sb-key'), email = local.get('lw-sb-email');
+  if (!url || !key) return LW.toast('Connect this device first', true);
+  const code = btoa(unescape(encodeURIComponent(JSON.stringify({ u: url, k: key, e: email })))).replace(/=+$/, '');
+  const link = location.origin + location.pathname + '#link-' + code;
+  $('#sLinkBox').hidden = false;
+  $('#sLinkOut').value = link;
+  await LW.copyText(link, 'Link copied: send it to your other device');
+});
+function readLink() {
+  const h = location.hash;
+  if (!h.startsWith('#link-')) return;
+  try {
+    const d = JSON.parse(decodeURIComponent(escape(atob(h.slice(6)))));
+    if (d.u && d.k) { local.set('lw-sb-url', d.u); local.set('lw-sb-key', d.k); local.set('lw-sb-email', d.e || ''); sb = null; }
+    history.replaceState(null, '', location.pathname + '#rig');
+    LW.go('rig');
+    renderRig();
+    syncLabel(local.get('lw-sb-on') ? null : 'Device link received. Type your LONEWOLF password once, then press Sign in.');
+    setTimeout(() => $('#sPass').focus(), 400);
+  } catch (e) { LW.toast('That link is broken. Make a new one on the laptop.', true); }
+}
 
 async function syncNow(loud) {
   if (syncing || !local.get('lw-sb-on')) { if (loud && !local.get('lw-sb-on')) LW.toast('Sign in first', true); return; }
@@ -230,9 +278,18 @@ async function syncNow(loud) {
 }
 LW.on('save', () => { if (applying || !local.get('lw-sb-on')) return; clearTimeout(syncT); syncT = setTimeout(syncNow, 8000); });
 addEventListener('online', () => setTimeout(syncNow, 1500));
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && local.get('lw-sb-on')) { clearTimeout(syncT); syncNow(); } });
+// push when you leave the app, pull when you come back to it
+document.addEventListener('visibilitychange', () => {
+  if (!local.get('lw-sb-on')) return;
+  clearTimeout(syncT);
+  if (document.visibilityState === 'hidden') syncNow();
+  else setTimeout(syncNow, 600);
+});
+// and check every 2 minutes while the app is open
+setInterval(() => { if (document.visibilityState === 'visible' && local.get('lw-sb-on')) syncNow(); }, 120000);
 LW.on('ready', () => {
   renderRig();
+  readLink();
   if (local.get('lw-sb-on')) setTimeout(syncNow, 1200);
   try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (e) {}
 });
