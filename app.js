@@ -12,7 +12,7 @@ const RANKS = [
   [0, 'Script Kiddie'], [150, 'Packet Sniffer'], [400, 'Code Breaker'],
   [800, 'Ghost Operator'], [1400, 'Black Hat'], [2200, 'Root'], [3200, 'Lone Wolf']
 ];
-const APP_VERSION = '2.7.0';
+const APP_VERSION = '2.7.1';
 
 // ============ vault: IndexedDB key-value storage ============
 const Vault = (() => {

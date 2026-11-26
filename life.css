@@ -77,19 +77,19 @@
 .ribbon[hidden]{display:none}
 .tz{position:absolute;top:0;bottom:0;width:22%;border:0;background:none;z-index:3;cursor:pointer}
 .tz.tl{left:0;cursor:w-resize}.tz.tr{right:0;cursor:e-resize}
-.flip{position:absolute;top:0;bottom:0;width:50%;z-index:4;transform-style:preserve-3d;pointer-events:none}
-.flip[hidden]{display:none}
-.flip .ff,.flip .fb{position:absolute;inset:0;background:#f2e8d3;backface-visibility:hidden;display:grid;place-items:center;overflow:hidden}
-.flip img{display:block;mix-blend-mode:multiply}
-.flip .fb{transform:rotateY(180deg)}
-.flip.fwd{left:50%;transform-origin:left center}
-.flip.back{left:0;transform-origin:right center}
-.flip.fwd.go{animation:flipF .6s cubic-bezier(.45,.05,.3,1) forwards}
-.flip.back.go{animation:flipB .6s cubic-bezier(.45,.05,.3,1) forwards}
-.flip.fwd .ff{box-shadow:inset 20px 0 30px -20px rgba(70,45,20,.6)}
-.flip.single{left:0;width:100%;transform-origin:left center}
-.flip.single.fwd.go{animation:flipS .55s ease-in forwards}
-.flip.single.back.go{animation:flipSb .55s ease-out forwards}
+.reader .flip{position:absolute;top:0;bottom:0;width:50%;z-index:4;transform-style:preserve-3d;pointer-events:none}
+.reader .flip[hidden]{display:none}
+.reader .flip .ff,.reader .flip .fb{position:absolute;inset:0;background:#f2e8d3;backface-visibility:hidden;display:grid;place-items:center;overflow:hidden}
+.reader .flip img{display:block;mix-blend-mode:multiply}
+.reader .flip .fb{transform:rotateY(180deg)}
+.reader .flip.fwd{left:50%;transform-origin:left center}
+.reader .flip.back{left:0;transform-origin:right center}
+.reader .flip.fwd.go{animation:flipF .6s cubic-bezier(.45,.05,.3,1) forwards}
+.reader .flip.back.go{animation:flipB .6s cubic-bezier(.45,.05,.3,1) forwards}
+.reader .flip.fwd .ff{box-shadow:inset 20px 0 30px -20px rgba(70,45,20,.6)}
+.reader .flip.single{left:0;width:100%;transform-origin:left center}
+.reader .flip.single.fwd.go{animation:flipS .55s ease-in forwards}
+.reader .flip.single.back.go{animation:flipSb .55s ease-out forwards}
 @keyframes flipF{0%{transform:rotateY(0)}100%{transform:rotateY(-180deg)}}
 @keyframes flipB{0%{transform:rotateY(0)}100%{transform:rotateY(180deg)}}
 @keyframes flipS{0%{transform:rotateY(0);opacity:1}100%{transform:rotateY(-95deg);opacity:.2}}
