@@ -20,7 +20,7 @@ const fmt = s => { s = Math.max(0, Math.round(s)); return `${String(Math.floor(s
 // ================= state (lives in LW.S.x so it syncs) =================
 function X() {
   const s = LW.S, x = (s.x ||= {});
-  for (const k of ['tx', 'tg', 'tl', 'min', 'cnt', 'tasks', 'habits', 'hlog', 'heist', 'snap', 'opsPaid', 'seen', 'manual', 'reset']) x[k] ||= {};
+  for (const k of ['tx', 'tg', 'tl', 'min', 'cnt', 'tasks', 'habits', 'hlog', 'heist', 'snap', 'opsPaid', 'seen', 'manual', 'reset', 'sess', 'dg', 'dl', 'deb', 'books', 'prs', 'ink', 'badges', 'wrapSeen']) x[k] ||= {};
   x.jr ||= { items: {} }; x.jr.items ||= {};
   return x;
 }
@@ -33,8 +33,27 @@ const rst = k => X().reset[k] || 0;
 const usedToday = k => (cntDay()['v:' + k] || 0) > rst(k);
 const seenEver = k => (X().seen[k] || 0) > rst(k);
 function clearMark(keys) { const now = Date.now(); keys.forEach(k => { X().reset[k] = now; }); LW.save(); }
-const minDay = (d = day()) => (X().min[d] ||= {});
-function addMin(tr, m) { const r = minDay(); r[tr] = (r[tr] || 0) + m; }
+// ---- session ledger: every logged / timed / answered session is its own record, so it can be undone ----
+const liveRecs = o => Object.entries(o || {}).filter(([, v]) => v && !v.del);
+function sessOn(d, fn) { return liveRecs(X().sess).map(([id, s]) => Object.assign({ id }, s)).filter(s => (!d || s.d === d) && (!fn || fn(s))); }
+const minDay = (d = day()) => { const r = {}; sessOn(d).forEach(s => { r[s.tr] = (r[s.tr] || 0) + (s.m || 0); }); return r; };
+function addSession(tr, m, xp, src, extra, msg, d) {
+  d = d || day(); const id = uid();
+  X().sess[id] = Object.assign({ d, tr, m: m || 0, xp: xp || 0, src, t: Date.now() }, extra || {});
+  if (tr === 'uni' && m) LW.bump('x');
+  if (xp) addT(tr, xp, msg, d); else LW.save();
+  return id;
+}
+function delSession(id, quiet) {
+  const s = X().sess[id]; if (!s || s.del) return;
+  s.del = 1; s.t = Date.now();
+  if (s.xp) addT(s.tr, -s.xp, quiet ? null : 'Session removed', s.d); else LW.save();
+}
+function migrateMin() { // turn the old per-day minute totals into undoable records
+  const x = X(); let n = 0;
+  Object.entries(x.min || {}).forEach(([d, r]) => Object.entries(r || {}).forEach(([tr, m]) => { const id = `L-${d}-${tr}`; if (m > 0 && !x.sess[id]) { x.sess[id] = { d, tr, m, xp: tr === 'uni' ? Math.round(m / 2) : m, src: 'legacy', t: 1 }; n++; } }));
+  if (n) LW.save(true);
+}
 
 // ================= XP TRACKS =================
 const LAD = names => [0, 100, 300, 700, 1300, 2200, 3500].map((x, i) => [x, names[i]]);
@@ -48,24 +67,68 @@ const TRACKS = {
 const TR = Object.keys(TRACKS);
 const xpOf = t => { if (t === 'uni') return LW.S.xp || 0; const x = X(); const g = x.tg[t] != null ? x.tg[t] : (x.tx[t] || 0); return Math.max(0, g - (x.tl[t] || 0)); };
 function rankIn(t, xp) { const L = TRACKS[t].ranks; let r = L[0], nx = null; for (let i = 0; i < L.length; i++) if (xp >= L[i][0]) { r = L[i]; nx = L[i + 1] || null; } return { base: r[0], name: r[1], next: nx, pct: nx ? Math.min(100, (xp - r[0]) / (nx[0] - r[0]) * 100) : 100 }; }
-function addT(t, n, msg) {
+// ---- daily XP ledger + Signal model ----
+let XPDAY = null;
+function recordDay(t, n, d) { const x = X(), k = n > 0 ? 'dg' : 'dl', r = (x[k][d] ||= {}); r[t] = (r[t] || 0) + Math.abs(n); }
+LW.onXP = n => recordDay('uni', n, XPDAY || day());
+const FORM = [0, 60, 180, 400, 750, 1200, 1800];          // rank thresholds on the last 30 active days
+const TARGET7 = { uni: 350, gym: 240, read: 210, write: 200, life: 140 };  // a "full" 7-day signal
+const SEASON = () => (X().season ||= { mode: 'semester', paused: {}, ranges: {}, t: 0 });
+const isPaused = t => !!(SEASON().paused || {})[t];
+const pausedOn = (t, d) => ((SEASON().ranges || {})[t] || []).some(([f, to]) => d >= f && (!to || d <= to));
+const dayNet = (d, t) => Math.max(0, ((X().dg[d] || {})[t] || 0) - ((X().dl[d] || {})[t] || 0));
+function activeDays(t, n) { const out = [], d = new Date(); for (let i = 0; i < 400 && out.length < n; i++) { const k = dkey(d); if (!pausedOn(t, k)) out.push(k); d.setDate(d.getDate() - 1); } return out; }
+const sumNet = (t, n) => activeDays(t, n).reduce((a, d) => a + dayNet(d, t), 0);
+const sig = t => { const v = sumNet(t, 7); return { v, pct: Math.min(100, v / TARGET7[t] * 100) }; };
+function formRank(t) {
+  const v = sumNet(t, 30), names = TRACKS[t].ranks.map(r => r[1]); let i = 0;
+  FORM.forEach((x, k) => { if (v >= x) i = k; });
+  const nx = i < FORM.length - 1 ? [FORM[i + 1], names[i + 1]] : null;
+  return { v, i, name: names[i], next: nx, pct: nx ? (v - FORM[i]) / (nx[0] - FORM[i]) * 100 : 100 };
+}
+const todayXP = t => dayNet(day(), t);
+function setPaused(t, on) {
+  const s = SEASON(); s.paused ||= {}; s.ranges ||= {};
+  if (!!s.paused[t] === !!on) return;
+  const r = (s.ranges[t] ||= []);
+  if (on) { s.paused[t] = 1; r.push([day(), null]); }
+  else {
+    delete s.paused[t];
+    const last = r[r.length - 1];
+    if (last && !last[1]) { const y = new Date(); y.setDate(y.getDate() - 1); const yd = dkey(y); if (yd < last[0]) r.pop(); else last[1] = yd; }
+    setTimeout(() => LW.ops.onWake && LW.ops.onWake(t), 50);
+  }
+  s.t = Date.now(); LW.save(); LW.topbar();
+}
+function setMode(mode) { const s = SEASON(); s.mode = mode; s.t = Date.now(); setPaused('uni', mode === 'holidays'); LW.save(); LW.topbar(); }
+LW.topbarHook = () => {
+  const el = $('#rankName'); if (!el || !LW.S) return false;
+  if (isPaused('uni')) { el.textContent = 'UNI asleep'; $('#xpTxt').textContent = SEASON().mode === 'holidays' ? 'holidays' : 'paused'; $('#xpBar').style.width = '0%'; return true; }
+  const f = formRank('uni'), s = sig('uni');
+  el.textContent = f.name; $('#xpTxt').textContent = `+${todayXP('uni')} today`; $('#xpBar').style.width = s.pct + '%';
+  return true;
+};
+function addT(t, n, msg, d) {
   if (!n) return;
-  if (t === 'uni') { LW.addXP(n, msg); LW.save(); return; }
-  const before = rankIn(t, xpOf(t)).name;
+  if (t === 'uni') { XPDAY = d || null; LW.addXP(n, msg); XPDAY = null; LW.save(); return; }
+  recordDay(t, n, d || day());
+  const before = formRank(t).name;
   const x = X(); if (x.tg[t] == null) x.tg[t] = x.tx[t] || 0;
   if (n > 0) x.tg[t] += n; else x.tl[t] = (x.tl[t] || 0) - n;
   x.tx[t] = xpOf(t);
-  const after = rankIn(t, xpOf(t)).name;
+  const after = formRank(t).name;
   if (msg) LW.toast(`${TRACKS[t].name} ${n > 0 ? '+' : ''}${n} XP · ${msg}`, n < 0);
   if (n > 0 && after !== before) setTimeout(() => { LW.toast(`${TRACKS[t].name} RANK UP // ${after}`); sfx('rankup'); }, 1600);
   LW.save();
 }
 const trSel = (id, val) => `<select class="sel" id="${id}">${TR.map(t => `<option value="${t}"${t === val ? ' selected' : ''}>${TRACKS[t].name} · ${TRACKS[t].long}</option>`).join('')}</select>`;
 const trDot = t => `<i class="tdot" style="background:${TRACKS[t].c}"></i>`;
-function tracksHTML() {
-  return TR.map(t => {
-    const xp = xpOf(t), r = rankIn(t, xp), c = TRACKS[t].c;
-    return `<div class="trk"><b style="color:${c}">${TRACKS[t].name}</b><div class="xb2"><i style="width:${r.pct}%;background:${c}"></i></div><small>${xp} XP</small><span class="rn">${esc(r.name)}${r.next ? ` · ${r.next[0] - xp} to ${esc(r.next[1])}` : ' · max rank'}</span></div>`;
+function tracksHTML(hidePaused) {
+  return TR.filter(t => !(hidePaused && isPaused(t))).map(t => {
+    const c = TRACKS[t].c, s = sig(t), f = formRank(t);
+    if (isPaused(t)) return `<div class="trk paused"><b style="color:${c}">${TRACKS[t].name}</b><div class="xb2"><i style="width:${s.pct}%;background:${c};opacity:.3"></i></div><small>asleep</small><span class="rn">frozen at ${esc(f.name)} · archive ${xpOf(t)}</span></div>`;
+    const td = todayXP(t);
+    return `<div class="trk"><b style="color:${c}">${TRACKS[t].name}</b><div class="xb2" title="7-day signal: ${s.v} / ${TARGET7[t]} XP"><i style="width:${s.pct}%;background:${c}"></i></div><small style="${td ? `color:${c}` : ''}">${td ? '+' + td : '0'} today</small><span class="rn">${esc(f.name)} · signal ${s.v}/${TARGET7[t]} · archive ${xpOf(t)}</span></div>`;
   }).join('');
 }
 
@@ -92,6 +155,11 @@ LW.mergeOps = (out, a, b) => {
   const bj = B.jr || {};
   if (!o.jr.ver && bj.ver) { o.jr.ver = bj.ver; o.jr.salt = bj.salt; }
   Object.entries(bj.items || {}).forEach(([id, v]) => { const cur = o.jr.items[id]; if (!cur || (v.t || 0) > (cur.t || 0)) o.jr.items[id] = v; });
+  ['sess', 'books', 'prs', 'ink'].forEach(K => Object.entries(B[K] || {}).forEach(([id, v]) => { const cur = sub(K)[id]; if (!cur || (v.t || 0) > (cur.t || 0)) o[K][id] = v; }));
+  ['dg', 'dl'].forEach(K => Object.entries(B[K] || {}).forEach(([d, r]) => { const t = (sub(K)[d] ||= {}); Object.entries(r || {}).forEach(([k, v]) => { t[k] = Math.max(t[k] || 0, v || 0); }); }));
+  Object.entries(B.deb || {}).forEach(([d, r]) => { const t = (sub('deb')[d] ||= {}); Object.entries(r || {}).forEach(([q, v]) => { if (!t[q] || (v.t || 0) > (t[q].t || 0)) t[q] = v; }); });
+  ['badges', 'wrapSeen'].forEach(K => Object.entries(B[K] || {}).forEach(([k, v]) => { if (v) sub(K)[k] = v; }));
+  ['season', 'notif'].forEach(K => { if (B[K] && (!o[K] || (B[K].t || 0) > (o[K].t || 0))) o[K] = B[K]; });
 };
 
 // ================= NETWORK HUB (radial) =================
@@ -108,10 +176,11 @@ const ICON = {
 };
 const tab = v => () => LW.go(v);
 const BR = [
-  { id: 'intel', name: 'INTEL', sub: 'notes · audio · AI', nodes: [
+  { id: 'intel', name: 'INTEL', sub: 'notes · audio · AI · insights', nodes: [
     { k: 'intel', n: 'Intel notes', d: 'Mission cards for the current module', run: tab('intel') },
     { k: 'audio', n: 'Audio Intel', d: 'Your notes read aloud (bus mode)', run: () => openOp('audio') },
-    { k: 'ask', n: 'Ask AI', d: 'Claude, Gemini, ChatGPT, Copilot', run: () => { visit('ask'); $('#handBtn').click(); } }] },
+    { k: 'ask', n: 'Ask AI', d: 'Claude, Gemini, ChatGPT, Copilot', run: () => { visit('ask'); $('#handBtn').click(); } },
+    { k: 'insights', n: 'Insights', d: 'Patterns found in your own data', run: () => openOp('insights') }] },
   { id: 'breach', name: 'BREACH', sub: 'cards · minigame · ops', nodes: [
     { k: 'burner', n: 'Burner', d: 'Spaced-repetition flashcards', run: () => LW.burn() },
     { k: 'breach', n: 'Breach', d: 'Hack the node chain before the trace hits 100%', run: () => openOp('breach') },
@@ -120,34 +189,40 @@ const BR = [
     { k: 'terminal', n: 'Terminal', d: 'Run real PHP and Python', run: tab('terminal') },
     { k: 'blackbook', n: 'Blackbook', d: 'Write code blind, get a diff', run: tab('blackbook') },
     { k: 'shell', n: 'WOLFSHELL', d: 'Command line for your whole rig', run: () => openOp('shell') }] },
-  { id: 'targets', name: 'TARGETS', sub: 'exam bosses · heist · log', nodes: [
+  { id: 'targets', name: 'TARGETS', sub: 'bosses · heist · bounties · wrapped', nodes: [
     { k: 'boss', n: 'Exam Bosses', d: 'Drain each exam\'s HP before exam day', run: () => openOp('boss') },
     { k: 'heist', n: 'Heist', d: 'Timed mock exam with a weak-spot radar', run: () => openOp('heist') },
-    { k: 'log', n: 'Breach log', d: 'Rank, heatmap, node grid', run: tab('log') }] },
-  { id: 'life', name: 'LIFE OPS', sub: 'tasks · habits · tracks', nodes: [
+    { k: 'bounties', n: 'Weekly Bounties', d: '3 big challenges a week, with badges', run: () => openOp('bounties') },
+    { k: 'log', n: 'Breach log', d: 'Rank, heatmap, node grid', run: tab('log') },
+    { k: 'wrapped', n: 'Weekly Wrapped', d: 'Your leaked weekly report', run: () => openOp('wrapped') }] },
+  { id: 'life', name: 'LIFE OPS', sub: 'debrief · tasks · habits · gym', nodes: [
+    { k: 'debrief', n: 'Debrief', d: 'Daily field report: one tap per question', run: () => openOp('debrief') },
     { k: 'tasks', n: 'Tasks', d: 'Personal missions with XP', run: () => openOp('tasks') },
-    { k: 'habits', n: 'Habits', d: 'Gym, sleep, reading: daily checks', run: () => openOp('habits') },
-    { k: 'tracks', n: 'XP Tracks', d: 'Uni, gym, reading, writing, life', run: () => openOp('tracks') },
-    { k: 'session', n: 'Log session', d: 'Log a gym / reading / writing session', run: () => openOp('tracks', 'log') }] },
-  { id: 'vault', name: 'VAULT', sub: 'encrypted journal', nodes: [
+    { k: 'habits', n: 'Habits', d: 'Daily checks with streaks', run: () => openOp('habits') },
+    { k: 'gymlab', n: 'Gym Lab', d: 'Splits, personal records, progress', run: () => openOp('gymlab') },
+    { k: 'tracks', n: 'Tracks & Seasons', d: 'Signal, form ranks, session log (undo)', run: () => openOp('tracks') }] },
+  { id: 'vault', name: 'ARCHIVE', sub: 'library · ink · journal', nodes: [
+    { k: 'library', n: 'Library', d: 'Read PDFs like a real book, with bookmarks', run: () => openOp('library') },
+    { k: 'ink', n: 'Ink Log', d: 'Word counts from your .docx, daily goals', run: () => openOp('ink') },
     { k: 'journal', n: 'Journal', d: 'PIN-locked, encrypted on this device', run: () => openOp('journal') },
-    { k: 'jnew', n: 'New entry', d: 'Write something down', run: () => openOp('journal', 'new') },
-    { k: 'jlock', n: 'Lock now', d: 'Wipe the key from memory', run: () => { lockVault(); visit('jlock'); LW.toast('Vault locked'); renderHub(); } }] },
+    { k: 'jlock', n: 'Lock vault', d: 'Wipe the key from memory', run: () => { lockVault(); visit('jlock'); LW.toast('Vault locked'); renderHub(); } }] },
   { id: 'cipher', name: 'CIPHER LAB', sub: 'crypto · passwords · manual', nodes: [
     { k: 'cipher', n: 'Ciphers', d: 'Caesar (brute force), Vigenère, Atbash', run: () => openOp('cipher', 'ciphers') },
     { k: 'encode', n: 'Encode', d: 'Base64, hex, binary, URL', run: () => openOp('cipher', 'encode') },
     { k: 'hash', n: 'Hash', d: 'SHA family + the avalanche effect', run: () => openOp('cipher', 'hash') },
-    { k: 'manual', n: 'Field Manual', d: 'Ethical hacking & secure coding tips', run: () => openOp('manual') }] },
-  { id: 'focus', name: 'FOCUS', sub: 'infiltration · screensaver', nodes: [
-    { k: 'focus', n: 'Infiltration', d: 'Focus timer: leave the app and stealth breaks', run: () => openOp('focus') },
     { k: 'pass', n: 'Password Forge', d: 'Generate and test passwords', run: () => openOp('cipher', 'pass') },
+    { k: 'manual', n: 'Field Manual', d: 'Ethical hacking & secure coding tips', run: () => openOp('manual') }] },
+  { id: 'focus', name: 'FOCUS', sub: 'lock-in · infiltration · saver', nodes: [
+    { k: 'lockin', n: 'LOCK-IN', d: 'Full HUD mode: missions, timer, comms', run: () => LW.lockin && LW.lockin.setup() },
+    { k: 'focus', n: 'Infiltration', d: 'Focus timer: leave the app and stealth breaks', run: () => openOp('focus') },
     { k: 'saver', n: 'Screensaver', d: 'Glitch clock for idle time', run: () => openOp('saver') }] }
 ];
 const CX = 500, CY = 500, RI = 150, RO = 240;
 const pol = (r, deg) => { const a = deg * Math.PI / 180; return [CX + r * Math.cos(a), CY + r * Math.sin(a)]; };
 const LAYOUT = {
   3: { p: [[300, 0], [372, -9], [372, 9]], e: [[-1, 0], [0, 1], [0, 2]] },
-  4: { p: [[300, 0], [368, -10], [368, 10], [436, -12]], e: [[-1, 0], [0, 1], [0, 2], [1, 3]] }
+  4: { p: [[300, 0], [368, -10], [368, 10], [436, -12]], e: [[-1, 0], [0, 1], [0, 2], [1, 3]] },
+  5: { p: [[300, 0], [368, -10], [368, 10], [436, -13], [436, 13]], e: [[-1, 0], [0, 1], [0, 2], [1, 3], [2, 4]] }
 };
 let SEL = Math.max(0, BR.findIndex(b => b.id === local.get('lw-br')));
 function nodeCls(k) { return usedToday(k) ? 'today' : seenEver(k) ? 'seen' : 'never'; }
@@ -219,8 +294,9 @@ function showOp() {
   if (!CUR || !PAGES[CUR.id]) return LW.go('net');
   const p = PAGES[CUR.id];
   $('#opTitle').textContent = p.t; $('#opSub').textContent = p.s || '';
-  $('#opBody').innerHTML = '';
-  p.r($('#opBody'), CUR.arg);
+  const host = $('#opBody'); host.innerHTML = '';
+  const b = document.createElement('div'); host.append(b);   // a fresh container per visit, so slow pages can't overwrite the next one
+  p.r(b, CUR.arg);
   $('#v-op').scrollTop = 0;
 }
 LW.onView('op', showOp);
@@ -230,27 +306,29 @@ const page = (id, t, s, r) => { PAGES[id] = { t, s, r }; };
 
 // ================= DAILY OPS =================
 const OPS_POOL = [
-  { k: 'cards', g: 'uni', n: 15, t: 'Burn 15 flashcards', v: () => ((LW.S.days[day()] || {}).cards || 0), go: () => LW.burn() },
-  { k: 'drills', g: 'uni', n: 1, t: 'Crack 1 Blackbook drill', v: () => ((LW.S.days[day()] || {}).drills || 0), go: () => LW.go('blackbook') },
-  { k: 'missions', g: 'uni', n: 1, t: 'Clear 1 Terminal mission', v: () => ((LW.S.days[day()] || {}).missions || 0), go: () => LW.go('terminal') },
-  { k: 'breach', g: 'uni', n: 1, t: 'Run 1 Breach', v: () => cntDay().breach || 0, go: () => openOp('breach') },
-  { k: 'heist', g: 'uni', n: 1, t: 'Pull off 1 Heist', v: () => cntDay().heist || 0, go: () => openOp('heist') },
-  { k: 'audio', g: 'uni', n: 1, t: 'Finish 1 Audio Intel node', v: () => cntDay().audio || 0, go: () => openOp('audio') },
-  { k: 'focus', g: 'life', n: 25, t: 'Stay hidden 25 min (Infiltration)', v: () => cntDay().focusMin || 0, go: () => openOp('focus') },
+  { k: 'cards', g: 'uni', tr: 'uni', n: 15, t: 'Burn 15 flashcards', v: () => ((LW.S.days[day()] || {}).cards || 0), go: () => LW.burn() },
+  { k: 'drills', g: 'uni', tr: 'uni', n: 1, t: 'Crack 1 Blackbook drill', v: () => ((LW.S.days[day()] || {}).drills || 0), go: () => LW.go('blackbook') },
+  { k: 'missions', g: 'uni', tr: 'uni', n: 1, t: 'Clear 1 Terminal mission', v: () => ((LW.S.days[day()] || {}).missions || 0), go: () => LW.go('terminal') },
+  { k: 'breach', g: 'uni', tr: 'uni', n: 1, t: 'Run 1 Breach', v: () => cntDay().breach || 0, go: () => openOp('breach') },
+  { k: 'heist', g: 'uni', tr: 'uni', n: 1, t: 'Pull off 1 Heist', v: () => cntDay().heist || 0, go: () => openOp('heist') },
+  { k: 'audio', g: 'uni', tr: 'uni', n: 1, t: 'Finish 1 Audio Intel node', v: () => cntDay().audio || 0, go: () => openOp('audio') },
+  { k: 'focus', g: 'life', n: 25, t: 'Stay hidden 25 min (Infiltration)', v: () => sessOn(day(), x => x.src === 'focus' || x.src === 'lockin').reduce((a, x) => a + x.m, 0), go: () => openOp('focus') },
   { k: 'habit', g: 'life', n: 2, t: 'Check off 2 habits', v: () => cntDay().habit || 0, go: () => openOp('habits') },
   { k: 'task', g: 'life', n: 1, t: 'Complete 1 Life Ops task', v: () => cntDay().task || 0, go: () => openOp('tasks') },
-  { k: 'read', g: 'life', n: 20, t: 'Read your own book for 20 min', v: () => minDay().read || 0, go: () => openOp('focus') },
-  { k: 'gym', g: 'life', n: 30, t: 'Log 30 min of training', v: () => minDay().gym || 0, go: () => openOp('tracks', 'log') },
+  { k: 'read', g: 'life', tr: 'read', n: 15, t: 'Read 15 pages of your own book', v: () => sessOn(day(), x => x.tr === 'read').reduce((a, x) => a + (x.pages || Math.round((x.m || 0) / 2)), 0), go: () => openOp('library') },
+  { k: 'gym', g: 'life', tr: 'gym', n: 30, t: 'Train for 30 min (answer it in Debrief)', v: () => minDay().gym || 0, go: () => openOp('debrief') },
   { k: 'manual', g: 'any', n: 1, t: 'Study 1 Field Manual entry', v: () => cntDay().manual || 0, go: () => openOp('manual') },
   { k: 'cipher', g: 'any', n: 1, t: 'Crack something in the Cipher Lab', v: () => cntDay().cipher || 0, go: () => openOp('cipher', 'ciphers') },
   { k: 'shell', g: 'any', n: 5, t: 'Run 5 WOLFSHELL commands', v: () => cntDay().shell || 0, go: () => openOp('shell') },
-  { k: 'write', g: 'any', n: 20, t: 'Write for 20 min (your own stuff)', v: () => minDay().write || 0, go: () => openOp('focus') }
+  { k: 'write', g: 'any', tr: 'write', n: 300, t: 'Write 300 words (Ink Log / Debrief)', v: () => sessOn(day(), x => x.tr === 'write').reduce((a, x) => a + (x.words || 0), 0), go: () => openOp('ink') }
 ];
 function opsFor(d) {
   let h = 2166136261; for (const ch of d) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; }
   const r = () => (h = Math.imul(h ^ (h >>> 15), 2246822507) >>> 0) / 4294967296;
-  const from = (g, skip) => { const a = OPS_POOL.filter(o => (g === 'any' || o.g === g) && !skip.includes(o)); return a[Math.floor(r() * a.length)]; };
-  const a = from('uni', []), b = from('life', [a]), c = from('any', [a, b]);
+  const avail = OPS_POOL.filter(o => !(o.tr && isPaused(o.tr)));
+  const from = (g, skip) => { let a = avail.filter(o => (g === 'any' || o.g === g) && !skip.includes(o)); if (!a.length) a = avail.filter(o => !skip.includes(o)); return a[Math.floor(r() * a.length)]; };
+  const ex = SEASON().mode === 'exams';
+  const a = from('uni', []), b = from(ex ? 'uni' : 'life', [a]), c = from('any', [a, b]);
   return [a, b, c];
 }
 function opsState() {
@@ -299,6 +377,7 @@ page('breach', 'Breach', 'Answer to hack each node. Wrong answers and time raise
   if (G && G.tick) clearInterval(G.tick);
   G = null;
   body.innerHTML = `<div class="box" style="max-width:820px"><div class="row2">${await modulePicker('bMod', arg)}<button class="btn go" id="bGo">▶ Start breach</button></div><p class="mut" style="margin-top:10px">8 nodes · 4 options each · keys 1–4 work. Weak cards come first. Each correct answer also counts toward your card contract.</p></div><div id="bArena"></div>`;
+  if (!body.isConnected) return;
   $('#bGo').onclick = async () => {
     const mod = await LW.getModule($('#bMod').value);
     if (!mod || mod.cards.length < 4) return LW.toast('Need at least 4 cards in this module', true);
@@ -405,6 +484,7 @@ page('heist', 'Heist', 'Timed mock exam: 7 multiple-choice + 3 recall questions 
   if (H && H.tick) clearInterval(H.tick);
   H = null;
   body.innerHTML = `<div class="box" style="max-width:820px"><div class="row2">${await modulePicker('hMod', arg)}<button class="btn go" id="hGo">▶ Start heist</button></div><p class="mut" style="margin-top:10px">Best score here: <b id="hBest"></b>. The timer doesn't stop. Recall questions: type your answer, reveal, then mark yourself honestly.</p></div><div id="hArena"></div>`;
+  if (!body.isConnected) return;
   const best = () => { $('#hBest').textContent = (X().heist[$('#hMod').value] || 0) + '%'; };
   best(); $('#hMod').onchange = best;
   $('#hGo').onclick = async () => {
@@ -531,9 +611,8 @@ function focusTick() {
   if (left <= 0) {
     const m = F.min, tr = F.tr;
     focusStop(); sfx('breach');
-    addMin(tr, m); count('focusMin', m);
-    if (tr === 'uni') LW.bump('focus');
-    addT(tr, m, `INFILTRATION COMPLETE · ${m} min undetected`);
+    count('focusMin', m);
+    addSession(tr, m, m, 'focus', null, `INFILTRATION COMPLETE · ${m} min undetected`);
     if (onOp('focus')) $('#opBody').insertAdjacentHTML('afterbegin', `<div class="box" style="border-color:var(--go2);margin-bottom:14px"><b style="color:var(--go)">✓ ${m} min logged to ${TRACKS[tr].name}.</b> <span class="mut">Take 5. Water, stretch, eyes off the screen.</span></div>`);
   }
 }
@@ -604,6 +683,7 @@ page('audio', 'Audio Intel', 'Your Intel notes, read aloud. Good for the bus, th
     <div class="box"><h3 id="aTitle">PICK A NODE</h3><div class="row2"><button class="btn go" id="aPlay" disabled>▶ Play</button><button class="btn" id="aStop">■ Stop</button>
     <select class="sel" id="aRate">${[0.8, 0.9, 1, 1.15, 1.3, 1.5].map(r => `<option value="${r}"${+(local.get('lw-tts-rate') || 1) === r ? ' selected' : ''}>${r}×</option>`).join('')}</select><select class="sel" id="aVoice" style="max-width:220px"></select></div>
     <div class="atext" id="aText" style="margin-top:12px"><p class="mut">Choose a node on the left.</p></div></div></div>`;
+  if (!body.isConnected) return;
   const fillVoices = () => { const vs = speechSynthesis.getVoices().filter(v => /^en/i.test(v.lang)); const cur = local.get('lw-tts-voice'); const sel = $('#aVoice'); if (!sel) return; sel.innerHTML = '<option value="">Default voice</option>' + vs.map(v => `<option${v.name === cur ? ' selected' : ''}>${esc(v.name)}</option>`).join(''); };
   fillVoices(); speechSynthesis.onvoiceschanged = fillVoices;
   const list = async () => {
@@ -677,21 +757,42 @@ document.addEventListener('click', e => {
   const x = e.target.closest('[data-hdel]');
   if (x) { const id = x.dataset.hdel; if (delArm !== id) { delArm = id; x.textContent = 'sure?'; return; } X().habits[id] = { del: 1, t: Date.now() }; delArm = ''; LW.save(); refreshAll(); }
 });
-page('tracks', 'XP Tracks', 'Separate XP for each part of your life, each with its own colour and rank ladder.', (body, arg) => {
-  const ds = daysBack(14), mx = Math.max(30, ...ds.map(d => TR.reduce((a, t) => a + ((X().min[d] || {})[t] || 0), 0)));
+const SRC = { focus: 'Infiltration', lockin: 'Lock-in', log: 'Logged', debrief: 'Debrief', book: 'Library', ink: 'Ink Log', legacy: 'Old log', pr: 'Gym PR' };
+page('tracks', 'Tracks & Seasons', 'Big number = today. Bar = 7-day signal (it drains if you stop). Rank = your form over the last 30 active days. Archive = lifetime.', (body, arg) => {
+  const S_ = SEASON(), ds = daysBack(14), mx = Math.max(30, ...ds.map(d => TR.reduce((a, t) => a + (minDay(d)[t] || 0), 0)));
   let chart = `<svg viewBox="0 0 700 180" style="width:100%">`;
-  ds.forEach((d, i) => { let y = 160; const x = 10 + i * 49; TR.forEach(t => { const v = (X().min[d] || {})[t] || 0; if (!v) return; const h = v / mx * 140; y -= h; chart += `<rect x="${x}" y="${y}" width="34" height="${h}" fill="${TRACKS[t].c}" rx="2"><title>${d} ${TRACKS[t].name}: ${v} min</title></rect>`; }); chart += `<text x="${x + 17}" y="176" text-anchor="middle" style="font:10px var(--mono);fill:#5c6870">${d.slice(8)}</text>`; });
+  ds.forEach((d, i) => { let y = 160; const x = 10 + i * 49, md = minDay(d); TR.forEach(t => { const v = md[t] || 0; if (!v) return; const h = v / mx * 140; y -= h; chart += `<rect x="${x}" y="${y}" width="34" height="${h}" fill="${TRACKS[t].c}" rx="2"><title>${d} ${TRACKS[t].name}: ${v} min</title></rect>`; }); chart += `<text x="${x + 17}" y="176" text-anchor="middle" style="font:10px var(--mono);fill:#5c6870">${d.slice(8)}</text>`; });
   chart += '</svg>';
-  body.innerHTML = `<div class="opgrid">${TR.map(t => { const xp = xpOf(t), r = rankIn(t, xp), wk = ds.slice(-7).reduce((a, d) => a + ((X().min[d] || {})[t] || 0), 0); return `<div class="box" style="border-color:color-mix(in srgb,${TRACKS[t].c} 35%,var(--line))"><h3 style="color:${TRACKS[t].c}">${TRACKS[t].name}</h3><span class="mut">${esc(TRACKS[t].long)}</span><div class="big" style="margin:8px 0">${xp}<small style="font-size:14px"> XP</small></div><div class="bar3"><i style="width:${r.pct}%;background:${TRACKS[t].c}"></i></div><p class="mut" style="margin:8px 0 0"><b style="color:var(--ink)">${esc(r.name)}</b>${r.next ? ` · ${r.next[0] - xp} XP to ${esc(r.next[1])}` : ' · top rank'} · ${wk} min this week</p></div>`; }).join('')}</div>
-    <div class="opgrid" style="margin-top:14px"><div class="box" id="logBox"><h3>LOG A SESSION</h3><p class="mut">Trained, read or wrote away from the app? Log it here. 1 XP per minute (Uni: ½ XP, since timed runs are the real thing).</p>${trSel('lTr', arg === 'log' ? 'gym' : 'read')}<div class="row2" style="margin-top:8px"><input class="inp" type="number" id="lMin" min="5" max="300" value="30" style="width:110px;margin:0"><span class="mut">minutes</span></div><button class="btn go" id="lGo" style="margin-top:10px;width:100%">Log session</button></div>
+  const hist = sessOn(null).sort((a, b) => (b.d || '').localeCompare(a.d || '') || (b.t - a.t)).slice(0, 40);
+  const what = x => [x.m ? x.m + ' min' : '', x.pages ? x.pages + ' pages' : '', x.words ? x.words + ' words' : '', x.kind || '', x.note || ''].filter(Boolean).join(' · ');
+  body.innerHTML = `<div class="box seasonbar"><h3>SEASON</h3><div class="chips">${[['semester', '🎓 Semester'], ['holidays', '🌴 Holidays'], ['exams', '🔥 Exams']].map(([k, v]) => `<button class="chip${S_.mode === k ? ' on' : ''}" data-mode="${k}">${v}</button>`).join('')}</div>
+      <p class="mut">Holidays puts UNI to sleep: no draining, no questions, hidden from Home. Exams makes Daily Ops all-uni. Pause any single track below.</p>
+      <div class="row2" style="margin-top:8px">${TR.map(t => `<button class="chip${isPaused(t) ? '' : ' on'}" data-pause="${t}" style="${isPaused(t) ? '' : `border-color:${TRACKS[t].c};color:${TRACKS[t].c};background:transparent`}">${isPaused(t) ? '⏸' : '●'} ${TRACKS[t].name}</button>`).join('')}</div></div>
+    <div class="opgrid" style="margin-top:14px">${TR.map(t => { const c = TRACKS[t].c, sg = sig(t), f = formRank(t), p = isPaused(t); return `<div class="box${p ? ' dimbox' : ''}" style="border-color:color-mix(in srgb,${c} 35%,var(--line))"><div class="row2" style="justify-content:space-between"><h3 style="color:${c};margin:0">${TRACKS[t].name}</h3>${p ? '<span class="pill">asleep</span>' : ''}</div><span class="mut">${esc(TRACKS[t].long)}</span>
+      <div class="big" style="margin:8px 0">${p ? '—' : '+' + todayXP(t)}<small style="font-size:13px"> today</small></div>
+      <div class="bar3" title="7-day signal"><i style="width:${sg.pct}%;background:${c}"></i></div><p class="mut" style="margin:6px 0 0">7-day signal ${sg.v}/${TARGET7[t]} XP</p>
+      <p class="mut" style="margin:6px 0 0"><b style="color:var(--ink)">${esc(f.name)}</b> (form: ${f.v} XP in 30 days)${f.next ? ` · ${f.next[0] - f.v} to ${esc(f.next[1])}` : ''}</p>
+      <p class="mut" style="margin:6px 0 0">Archive: ${xpOf(t)} XP lifetime</p></div>`; }).join('')}</div>
+    <div class="opgrid" style="margin-top:14px"><div class="box" id="logBox"><h3>LOG A SESSION</h3><p class="mut">Did something away from the app? Log it. 1 XP per minute (Uni: ½ XP). Logged it by mistake? Undo it in the session log.</p>${trSel('lTr', arg === 'log' ? 'gym' : 'read')}<div class="row2" style="margin-top:8px"><input class="inp" type="number" id="lMin" min="5" max="300" value="30" style="width:110px;margin:0"><span class="mut">minutes</span></div><button class="btn go" id="lGo" style="margin-top:10px;width:100%">Log session</button></div>
+    <div class="box" style="grid-column:span 2;min-width:0"><h3>SESSION LOG · tap ✕ to undo (XP comes back off too)</h3><div class="slog">${hist.map(x => `<div class="srow"><i class="tdot" style="background:${TRACKS[x.tr] ? TRACKS[x.tr].c : '#888'}"></i><span class="sd">${esc(x.d.slice(5))}</span><span class="sw"><b>${TRACKS[x.tr] ? TRACKS[x.tr].name : x.tr}</b> ${esc(SRC[x.src] || x.src)}${what(x) ? ' · ' + esc(what(x)) : ''}</span><span class="sx">${x.xp ? '+' + x.xp + ' XP' : ''}</span><button class="btn sm" data-sdel="${x.id}" aria-label="Undo">✕</button></div>`).join('') || '<p class="mut">No sessions yet.</p>'}</div></div>
     <div class="box" style="grid-column:1/-1"><h3>LAST 14 DAYS (minutes)</h3>${chart}<div class="hubleg">${TR.map(t => `<span><i style="background:${TRACKS[t].c}"></i>${TRACKS[t].name}</span>`).join('')}</div></div></div>`;
   $('#lGo').onclick = () => {
     const tr = $('#lTr').value, m = Math.min(300, Math.max(1, Math.round(+$('#lMin').value || 0)));
-    addMin(tr, m); if (tr === 'uni') LW.bump('x');
-    addT(tr, tr === 'uni' ? Math.round(m / 2) : Math.min(180, m), `${m} min logged`); sfx('granted');
+    addSession(tr, m, tr === 'uni' ? Math.round(m / 2) : Math.min(180, m), 'log', null, `${m} min logged`); sfx('granted');
     PAGES.tracks.r(body, arg);
   };
+  body.querySelector('.seasonbar').onclick = e => {
+    const m = e.target.closest('[data-mode]'); if (m) { setMode(m.dataset.mode); sfx('tick'); return PAGES.tracks.r(body, arg); }
+    const p = e.target.closest('[data-pause]'); if (p) { setPaused(p.dataset.pause, !isPaused(p.dataset.pause)); sfx('tick'); PAGES.tracks.r(body, arg); }
+  };
   if (arg === 'log') setTimeout(() => $('#logBox') && $('#logBox').scrollIntoView({ block: 'center' }), 60);
+});
+let sdelArm = '';
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-sdel]'); if (!b) return;
+  const id = b.dataset.sdel;
+  if (sdelArm !== id) { sdelArm = id; b.textContent = 'undo?'; setTimeout(() => { if (sdelArm === id) { sdelArm = ''; if (b.isConnected) b.textContent = '✕'; } }, 2500); return; }
+  sdelArm = ''; delSession(id); sfx('denied'); refreshAll();
 });
 
 // ================= ENCRYPTED VAULT (journal) =================
@@ -946,7 +1047,7 @@ const CMDS = {
     if (a[0] === 'check') { const h = hs[+a[1] - 1]; if (!h) return shOut(sp('r', 'no habit #' + a[1])); if (hOn(day(), h[0])) return shOut(sp('d', 'already checked today')); (X().hlog[day()] ||= {})[h[0]] = { v: 1, t: Date.now() }; count('habit'); addT(h[1].tr, 10, h[1].name + ' ✓'); return shOut(sp('g', '✓ ' + h[1].name)); }
     shOut(sp('r', 'habit: add | check <n>'));
   },
-  log: a => { const tr = findTr(a[0]), m = Math.round(+a[1]); if (!tr || !(m > 0)) return shOut(sp('r', 'usage: log <gym|read|write|life|uni> <minutes>')); const mm = Math.min(300, m); addMin(tr, mm); if (tr === 'uni') LW.bump('x'); addT(tr, tr === 'uni' ? Math.round(mm / 2) : Math.min(180, mm), `${mm} min logged`); shOut(sp('g', `logged ${mm} min → ${TRACKS[tr].name}`)); },
+  log: a => { const tr = findTr(a[0]), m = Math.round(+a[1]); if (!tr || !(m > 0)) return shOut(sp('r', 'usage: log <gym|read|write|life|uni> <minutes>')); const mm = Math.min(300, m); addSession(tr, mm, tr === 'uni' ? Math.round(mm / 2) : Math.min(180, mm), 'log', null, `${mm} min logged`); shOut(sp('g', `logged ${mm} min → ${TRACKS[tr].name}`)); },
   focus: a => { const m = Math.round(+a[0]) || 25, tr = findTr(a[1]) || 'uni'; if (F.on) return shOut(sp('a', 'a run is already active')); focusStart(Math.min(180, m), tr, true, false); shOut(sp('g', `going dark: ${m} min on ${TRACKS[tr].name}`)); openOp('focus'); },
   due: async () => { const rows = []; for (const m of LW.modules()) { try { const mod = await LW.getModule(m.id); const st = (LW.S.mods[m.id] || {}).cards || {}; rows.push(`${m.code.padEnd(10)} ${String(mod.cards.filter(k => !st[k.id] || st[k.id].d <= Date.now()).length).padStart(4)} due / ${mod.cards.length}`); } catch (e) {} } shOut(esc(rows.join('\n') || 'no modules')); },
   exam: () => { const ex = Object.entries(LW.S.exams || {}); shOut(ex.length ? ex.map(([id, d]) => { const m = LW.modules().find(x => x.id === id); const n = Math.ceil((new Date(d + 'T09:00') - new Date()) / LW.DAY); return `${esc((m ? m.code : id).padEnd(10))} ${d}  ${n > 0 ? sp(n <= 7 ? 'r' : 'a', n + 'd') : sp('d', n === 0 ? 'TODAY' : 'done')}`; }).join('\n') : sp('d', 'no exam dates (set them in Rig)')); },
@@ -1048,7 +1149,7 @@ const Saver = (() => {
   addEventListener('resize', () => { if (on) layout(); });
   setInterval(() => {
     const m = idleMin(); if (!m || on || document.hidden || $('#boot')) return;
-    if ((G && !G.over && onOp('breach')) || (H && !H.over && onOp('heist')) || A.playing) return;
+    if ((G && !G.over && onOp('breach')) || (H && !H.over && onOp('heist')) || A.playing || (LW.lockin && LW.lockin.active) || document.querySelector('.reader')) return;
     if (Date.now() - last >= m * 60e3) show();
   }, 5000);
   return { show, hide, idleMin };
@@ -1064,18 +1165,21 @@ page('saver', 'Screensaver', 'Glitch clock with live data traces. Shows your foc
 function renderHomeOps() {
   const box = $('#hOps'); if (!box) return;
   const i = tipOfDay(), m = MAN[i];
-  box.innerHTML = `<div class="box"><button class="netgo" data-go-net>◎ OPEN NETWORK</button><h3>TRACKS</h3>${tracksHTML()}</div>
+  box.innerHTML = `<div class="box"><button class="netgo" data-go-net>◎ OPEN NETWORK</button><h3>TRACKS · today</h3>${tracksHTML(true)}</div>
     <div class="box"><h3>DAILY OPS</h3>${opsHTML(true)}</div>
     <div class="box"><h3>FIELD MANUAL · TIP OF THE DAY</h3><span class="tag2">${m[0]}</span><p style="font:600 15px var(--read);margin:10px 0 6px">${esc(m[1])}</p><p class="hint2">${fmtTip(m[2])}</p><div class="row2" style="margin-top:10px"><button class="btn sm" data-opentip="${i}">Open in manual</button>${F.on ? `<button class="btn go sm" onclick="LW.go('op')">Focus run: ${TRACKS[F.tr].name}</button>` : ''}</div></div>`;
+  if (LW.ops && LW.ops.homeExtra) LW.ops.homeExtra();
 }
 document.addEventListener('click', e => { if (e.target.closest('[data-go-net]')) LW.go('net'); });
 LW.onView('home', renderHomeOps);
 function refreshAll() {
   if ($('#v-home').classList.contains('on')) renderHomeOps();
   if ($('#v-net').classList.contains('on')) renderHub();
-  if (onOp() && ['tasks', 'habits', 'tracks', 'ops'].includes(CUR.id)) PAGES[CUR.id].r($('#opBody'), CUR.arg);
+  if (onOp() && ['tasks', 'habits', 'tracks', 'ops', 'debrief', 'bounties'].includes(CUR.id)) PAGES[CUR.id].r($('#opBody'), CUR.arg);
 }
 // re-draw after a sync pulls changes from the other device
 let rT = 0; LW.on('save', () => { clearTimeout(rT); rT = setTimeout(() => { if ($('#v-home').classList.contains('on')) renderHomeOps(); if ($('#v-net').classList.contains('on')) renderHub(); }, 300); });
-LW.ops = { open: openOp, Saver, TRACKS, addT };
+LW.ops = { open: openOp, page, PAGES, Saver, TRACKS, TR, addT, X, count, visit, addSession, delSession, sessOn, minDay, isPaused, setPaused, setMode, SEASON, sig, formRank, todayXP, dayNet, xpOf, refreshAll, opsState, opsHTML, F, focusStart, Amb, MAN, trSel, trDot, fmt, onOp, daysBack, dkey, uid, sfx, live: liveRecs, tracksHTML, TARGET7, renderHub, get CUR() { return CUR; } };
+LW.on('ready', () => { migrateMin(); LW.topbar(); });
+LW.on('save', () => migrateMin());
 }

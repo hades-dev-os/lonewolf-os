@@ -12,7 +12,7 @@ const RANKS = [
   [0, 'Script Kiddie'], [150, 'Packet Sniffer'], [400, 'Code Breaker'],
   [800, 'Ghost Operator'], [1400, 'Black Hat'], [2200, 'Root'], [3200, 'Lone Wolf']
 ];
-const APP_VERSION = '2.6.0';
+const APP_VERSION = '2.7.0';
 
 // ============ vault: IndexedDB key-value storage ============
 const Vault = (() => {
@@ -82,6 +82,7 @@ function addXP(n, msg, bad) {
   normXP(S);
   if (n > 0) S.xpGain += n; else S.xpLoss += -n;
   S.xp = Math.max(0, S.xpGain - S.xpLoss);
+  if (window.LW && LW.onXP) LW.onXP(n);
   const after = rankOf(S.xp)[1];
   if (msg) toast(msg + (n ? ` ${n > 0 ? '+' : ''}${n} XP` : ''), bad);
   if (after !== before && n > 0) setTimeout(() => { toast('RANK UP // ' + after); window.SFX && SFX.play('rankup'); }, 1600);
@@ -95,10 +96,13 @@ function toast(msg, bad) {
   clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 2400);
 }
 function topbar() {
-  const [base, name, next] = rankOf(S.xp);
-  $('#rankName').textContent = name;
-  $('#xpTxt').textContent = S.xp + ' XP';
-  $('#xpBar').style.width = next ? Math.min(100, (S.xp - base) / (next[0] - base) * 100) + '%' : '100%';
+  let hooked = false; try { hooked = !!(window.LW && LW.topbarHook && LW.topbarHook()); } catch (e) {}
+  if (!hooked) {
+    const [base, name, next] = rankOf(S.xp);
+    $('#rankName').textContent = name;
+    $('#xpTxt').textContent = S.xp + ' XP';
+    $('#xpBar').style.width = next ? Math.min(100, (S.xp - base) / (next[0] - base) * 100) + '%' : '100%';
+  }
   const chip = $('#examChip');
   const ex = MOD && S.exams && S.exams[MOD.id];
   if (ex) {
@@ -227,53 +231,22 @@ function openNode(id) {
   const cardCount = MOD.cards.filter(c => c.node === n.id).length;
   $('#nodeCard').innerHTML =
     `<div class="chead"><div><div class="code">${esc(n.code)}</div><h1>${esc(n.name)}</h1></div>` +
-    `<div class="row"><span class="pill${st.read ? ' go' : ''}" id="readPill"></span>${st.read ? '<button class="btn sm" id="unreadBtn" title="Mark as not read yet (−10 XP)">↺ Unread</button>' : ''}<button class="btn${st.hacked ? ' go' : ''}" id="hackBtn">${st.hacked ? '✓ Node hacked' : 'Mark node hacked'}</button>` +
+    `<div class="row">${st.read ? '<button class="btn go" id="unreadBtn" title="Tap to mark as unread (−10 XP)">✓ Read · undo</button>' : '<button class="btn" id="readBtn" title="+10 XP">📖 Mark read</button>'}<button class="btn${st.hacked ? ' go' : ''}" id="hackBtn">${st.hacked ? '✓ Node hacked' : 'Mark node hacked'}</button>` +
     (cardCount ? `<button class="btn" id="burnBtn">Burn ${cardCount} cards</button>` : '') +
     `<button class="btn" id="askNode">Ask AI</button></div></div><div class="md">${body}<div id="readEnd" style="height:1px"></div></div>`;
   $$('#nodeCard pre[data-i]').forEach(p => { const c = CODES[+p.dataset.i]; paint(p, c.code, c.lang); });
   $$('#nodeCard .md input[type=checkbox]').forEach(c => c.disabled = true);
   $('#nodeCard').scrollTop = 0;
-  readStart(n, st);
   renderNodes();
-}
-// reading tracker: +10 XP only after enough active reading time AND reaching the end of the note
-let RT = null, lastAct = Date.now();
-['scroll', 'pointerdown', 'keydown', 'wheel', 'touchmove'].forEach(ev => addEventListener(ev, () => { lastAct = Date.now(); }, { capture: true, passive: true }));
-function readPill() {
-  const p = $('#readPill'); if (!p) return;
-  const st = M().nodes[NODE] || {};
-  if (st.read) { p.textContent = '✓ read'; p.className = 'pill go'; return; }
-  if (!RT) return;
-  p.className = 'pill';
-  p.textContent = `📖 ${Math.min(RT.t, RT.need)}s / ${RT.need}s${RT.bottom ? '' : ' · scroll to the end'}`;
-}
-function readStart(n, st) {
-  if (RT) clearInterval(RT.timer);
-  RT = null;
-  if (st.read) { readPill(); return; }
-  const words = (n.md || '').split(/\s+/).length;
-  RT = { id: n.id, need: Math.max(15, Math.min(180, Math.round(words / 250 * 60 * 0.5))), t: 0, bottom: false };
-  RT.timer = setInterval(() => {
-    if (!RT || NODE !== RT.id || !MOD) { if (RT) clearInterval(RT.timer); RT = null; return; }
-    const active = VIEW === 'intel' && !document.hidden && Date.now() - lastAct < 90e3;
-    if (!active) return;
-    RT.t++;
-    const end = $('#readEnd');
-    if (end && end.getBoundingClientRect().top <= innerHeight + 40) RT.bottom = true;
-    if (RT.t >= RT.need && RT.bottom) {
-      clearInterval(RT.timer);
-      const s2 = (M().nodes[RT.id] ||= {});
-      if (!s2.read) { s2.read = 1; s2.t = Date.now(); addXP(10, 'INTEL READ'); bump('read'); window.SFX && SFX.play('granted'); save(); }
-      RT = null; openNode(NODE); return;
-    }
-    readPill();
-  }, 1000);
-  readPill();
 }
 $('#nodes').addEventListener('click', e => { const b = e.target.closest('[data-node]'); if (b) openNode(b.dataset.node); });
 $('#nSearch').addEventListener('input', renderNodes);
 $('#nodeCard').addEventListener('click', async e => {
   const t = e.target.closest('button'); if (!t) return;
+  if (t.id === 'readBtn') {
+    const st = M().nodes[NODE]; st.read = 1; st.t = Date.now();
+    addXP(10, 'INTEL READ'); bump('read'); window.SFX && SFX.play('granted'); save(); openNode(NODE); return;
+  }
   if (t.id === 'unreadBtn') {
     const st = M().nodes[NODE]; st.read = 0; st.t = Date.now();
     addXP(-10, 'Marked unread', true); save(); openNode(NODE); return;
