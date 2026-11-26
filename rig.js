@@ -57,7 +57,11 @@ $('#rgTest').addEventListener('click', async () => {
 // ================= merging (used by sync and restore) =================
 function mergeState(a, b) {
   const out = clone(a); b = b || {};
-  out.xp = Math.max(out.xp || 0, b.xp || 0);
+  // XP = earned − lost (both only grow), so deductions survive a sync
+  const gain = x => x.xpGain != null ? x.xpGain : (x.xp || 0);
+  out.xpGain = Math.max(gain(a || {}), gain(b));
+  out.xpLoss = Math.max((a || {}).xpLoss || 0, b.xpLoss || 0);
+  out.xp = Math.max(0, out.xpGain - out.xpLoss);
   out.days = out.days || {};
   Object.entries(b.days || {}).forEach(([k, d]) => {
     const o = out.days[k] || (out.days[k] = {});
@@ -70,7 +74,14 @@ function mergeState(a, b) {
   Object.entries(b.mods || {}).forEach(([id, bm]) => {
     const m = out.mods[id] || (out.mods[id] = { nodes: {}, cards: {}, drills: {}, chal: {} });
     m.nodes = m.nodes || {}; m.cards = m.cards || {}; m.drills = m.drills || {}; m.chal = m.chal || {};
-    Object.entries(bm.nodes || {}).forEach(([k, v]) => { const o = m.nodes[k] || (m.nodes[k] = {}); ['read', 'hacked', 'hackedOnce'].forEach(f => { if (v[f]) o[f] = 1; }); });
+    Object.entries(bm.nodes || {}).forEach(([k, v]) => {
+      const o = m.nodes[k];
+      if (!o) { m.nodes[k] = Object.assign({}, v); return; }
+      const once = o.hackedOnce || v.hackedOnce ? 1 : 0;
+      if (v.t || o.t) { if ((v.t || 0) > (o.t || 0)) m.nodes[k] = Object.assign({}, v); }   // newest edit wins (so un-read / un-hack sync)
+      else ['read', 'hacked'].forEach(f => { if (v[f]) o[f] = 1; });
+      if (once) m.nodes[k].hackedOnce = 1;
+    });
     Object.entries(bm.cards || {}).forEach(([k, v]) => { const o = m.cards[k]; if (!o || (v.t || 0) > (o.t || 0)) m.cards[k] = v; });
     Object.entries(bm.drills || {}).forEach(([k, v]) => { m.drills[k] = Math.max(m.drills[k] || 0, v || 0); });
     Object.entries(bm.chal || {}).forEach(([k, v]) => { if (v) m.chal[k] = 1; });

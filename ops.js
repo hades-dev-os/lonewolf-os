@@ -20,14 +20,19 @@ const fmt = s => { s = Math.max(0, Math.round(s)); return `${String(Math.floor(s
 // ================= state (lives in LW.S.x so it syncs) =================
 function X() {
   const s = LW.S, x = (s.x ||= {});
-  for (const k of ['tx', 'min', 'cnt', 'tasks', 'habits', 'hlog', 'heist', 'snap', 'opsPaid', 'seen', 'manual']) x[k] ||= {};
+  for (const k of ['tx', 'tg', 'tl', 'min', 'cnt', 'tasks', 'habits', 'hlog', 'heist', 'snap', 'opsPaid', 'seen', 'manual', 'reset']) x[k] ||= {};
   x.jr ||= { items: {} }; x.jr.items ||= {};
   return x;
 }
 const cntDay = (d = day()) => (X().cnt[d] ||= {});
-function count(k, n = 1) { const c = cntDay(); c[k] = Math.max(0, (c[k] || 0) + n); X().seen[k] = 1; LW.save(); }
-function visit(k) { const c = cntDay(); if (!c['v:' + k]) { c['v:' + k] = 1; X().seen[k] = 1; LW.save(true); } }
-const usedToday = k => { const c = cntDay(); return !!(c[k] || c['v:' + k]); };
+const NODE_OF = { focusMin: 'focus', task: 'tasks', habit: 'habits', journal: 'journal' };
+function mark(k) { const now = Date.now(); cntDay()['v:' + k] = now; X().seen[k] = now; }
+function count(k, n = 1) { const c = cntDay(); c[k] = Math.max(0, (c[k] || 0) + n); if (n > 0) mark(NODE_OF[k] || k); LW.save(); }
+function visit(k) { mark(k); LW.save(true); }
+const rst = k => X().reset[k] || 0;
+const usedToday = k => (cntDay()['v:' + k] || 0) > rst(k);
+const seenEver = k => (X().seen[k] || 0) > rst(k);
+function clearMark(keys) { const now = Date.now(); keys.forEach(k => { X().reset[k] = now; }); LW.save(); }
 const minDay = (d = day()) => (X().min[d] ||= {});
 function addMin(tr, m) { const r = minDay(); r[tr] = (r[tr] || 0) + m; }
 
@@ -41,13 +46,15 @@ const TRACKS = {
   life: { name: 'LIFE', long: 'Life ops, habits, tasks', c: '#ffc24a', ranks: LAD(['Civilian', 'Operative', 'Handler', 'Fixer', 'Ghost', 'Mastermind', 'Legend']) }
 };
 const TR = Object.keys(TRACKS);
-const xpOf = t => t === 'uni' ? (LW.S.xp || 0) : (X().tx[t] || 0);
+const xpOf = t => { if (t === 'uni') return LW.S.xp || 0; const x = X(); const g = x.tg[t] != null ? x.tg[t] : (x.tx[t] || 0); return Math.max(0, g - (x.tl[t] || 0)); };
 function rankIn(t, xp) { const L = TRACKS[t].ranks; let r = L[0], nx = null; for (let i = 0; i < L.length; i++) if (xp >= L[i][0]) { r = L[i]; nx = L[i + 1] || null; } return { base: r[0], name: r[1], next: nx, pct: nx ? Math.min(100, (xp - r[0]) / (nx[0] - r[0]) * 100) : 100 }; }
 function addT(t, n, msg) {
   if (!n) return;
   if (t === 'uni') { LW.addXP(n, msg); LW.save(); return; }
   const before = rankIn(t, xpOf(t)).name;
-  X().tx[t] = Math.max(0, xpOf(t) + n);
+  const x = X(); if (x.tg[t] == null) x.tg[t] = x.tx[t] || 0;
+  if (n > 0) x.tg[t] += n; else x.tl[t] = (x.tl[t] || 0) - n;
+  x.tx[t] = xpOf(t);
   const after = rankIn(t, xpOf(t)).name;
   if (msg) LW.toast(`${TRACKS[t].name} ${n > 0 ? '+' : ''}${n} XP · ${msg}`, n < 0);
   if (n > 0 && after !== before) setTimeout(() => { LW.toast(`${TRACKS[t].name} RANK UP // ${after}`); sfx('rankup'); }, 1600);
@@ -67,12 +74,19 @@ LW.mergeOps = (out, a, b) => {
   const A = a.x || {}, B = b.x || {}; if (!a.x && !b.x) return;
   const o = out.x = JSON.parse(JSON.stringify(A));
   const sub = k => (o[k] ||= {});
-  Object.entries(B.tx || {}).forEach(([k, v]) => { sub('tx')[k] = Math.max(o.tx[k] || 0, v || 0); });
+  const G = x => Object.assign({}, x.tx || {}, x.tg || {});
+  const ga = G(A), gb = G(B); sub('tg'); sub('tl'); sub('tx');
+  new Set([...Object.keys(ga), ...Object.keys(gb), ...Object.keys(B.tl || {})]).forEach(k => {
+    o.tg[k] = Math.max(ga[k] || 0, gb[k] || 0);
+    o.tl[k] = Math.max((A.tl || {})[k] || 0, (B.tl || {})[k] || 0);
+    o.tx[k] = Math.max(0, o.tg[k] - o.tl[k]);
+  });
   ['min', 'cnt'].forEach(K => Object.entries(B[K] || {}).forEach(([d, r]) => { const t = (sub(K)[d] ||= {}); Object.entries(r || {}).forEach(([k, v]) => { t[k] = Math.max(t[k] || 0, v || 0); }); }));
   ['tasks', 'habits'].forEach(K => Object.entries(B[K] || {}).forEach(([id, v]) => { const cur = sub(K)[id]; if (!cur || (v.t || 0) > (cur.t || 0)) o[K][id] = v; }));
   Object.entries(B.hlog || {}).forEach(([d, r]) => { const t = (sub('hlog')[d] ||= {}); Object.entries(r || {}).forEach(([id, v]) => { if (!t[id] || (v.t || 0) > (t[id].t || 0)) t[id] = v; }); });
   Object.entries(B.heist || {}).forEach(([k, v]) => { sub('heist')[k] = Math.max(o.heist[k] || 0, v || 0); });
-  ['opsPaid', 'seen', 'manual'].forEach(K => Object.entries(B[K] || {}).forEach(([k, v]) => { if (v) sub(K)[k] = v; }));
+  ['opsPaid', 'manual'].forEach(K => Object.entries(B[K] || {}).forEach(([k, v]) => { if (v) sub(K)[k] = v; }));
+  ['seen', 'reset'].forEach(K => Object.entries(B[K] || {}).forEach(([k, v]) => { sub(K)[k] = Math.max(o[K][k] || 0, v || 0); }));
   Object.entries(B.snap || {}).forEach(([k, v]) => { if (!sub('snap')[k] || (v.d > o.snap[k].d)) o.snap[k] = v; });
   o.jr ||= { items: {} }; o.jr.items ||= {};
   const bj = B.jr || {};
@@ -136,7 +150,7 @@ const LAYOUT = {
   4: { p: [[300, 0], [368, -10], [368, 10], [436, -12]], e: [[-1, 0], [0, 1], [0, 2], [1, 3]] }
 };
 let SEL = Math.max(0, BR.findIndex(b => b.id === local.get('lw-br')));
-function nodeCls(k) { return usedToday(k) ? 'today' : X().seen[k] ? 'seen' : 'never'; }
+function nodeCls(k) { return usedToday(k) ? 'today' : seenEver(k) ? 'seen' : 'never'; }
 function renderHub() {
   const host = $('#netHub'); if (!host) return;
   let svg = `<svg class="hub" viewBox="28 28 944 944" role="group" aria-label="Network hub">`;
@@ -167,12 +181,20 @@ function renderHub() {
   const op = opsState();
   host.innerHTML = `<div class="hubw">${svg}</div><div class="hubside">
     <div class="hud"><h3>OPERATOR // HADES</h3>${tracksHTML()}</div>
-    <div class="hud"><h3>${B.name}</h3><div class="blist">${B.nodes.map((n, j) => `<button class="bnode" data-b="${SEL}" data-n="${j}"><i class="dt ${nodeCls(n.k)}">${j + 1}</i><div><b>${esc(n.n)}</b><span>${esc(n.d)}</span></div></button>`).join('')}</div></div>
-    <div class="hud"><h3>DAILY OPS ${op.done}/3${op.paid ? ' ✓' : ''}</h3><div class="hubleg"><span><i style="background:var(--go)"></i>used today</span><span><i style="background:#f4f7f9"></i>used before</span><span><i style="background:#050607"></i>not tried yet</span></div><p class="mut" style="margin:8px 0 0">Tap a segment to switch branch. Tap a node to open it. ← → keys rotate.</p></div></div>`;
+    <div class="hud"><h3>${B.name}</h3><div class="blist">${B.nodes.map((n, j) => `<div class="bwrap"><button class="bnode" data-b="${SEL}" data-n="${j}"><i class="dt ${nodeCls(n.k)}">${j + 1}</i><div><b>${esc(n.n)}</b><span>${esc(n.d)}</span></div></button>${nodeCls(n.k) !== 'never' ? `<button class="brst" data-rst="${n.k}" title="Clear this mark" aria-label="Clear mark on ${esc(n.n)}">↺</button>` : ''}</div>`).join('')}</div>
+    ${B.nodes.some(n => nodeCls(n.k) !== 'never') ? `<button class="btn sm" data-rstb="${SEL}" style="margin-top:10px">↺ Clear ${B.name} marks</button>` : ''}</div>
+    <div class="hud"><h3>DAILY OPS ${op.done}/3${op.paid ? ' ✓' : ''}</h3><div class="hubleg"><span><i style="background:var(--go)"></i>used today</span><span><i style="background:#f4f7f9"></i>used before</span><span><i style="background:#050607"></i>not tried yet</span></div><p class="mut" style="margin:8px 0 0">Tap a segment to switch branch. Tap a node to open it. ← → keys rotate. ↺ clears a mark (opened by mistake). Clearing only resets the dot: XP and progress stay.</p><button class="btn sm red" id="rstAll" style="margin-top:10px">Clear ALL network marks</button></div></div>`;
 }
 function pick(i, silent) { SEL = (i + BR.length) % BR.length; local.set('lw-br', BR[SEL].id); if (!silent) sfx('tick'); renderHub(); }
+let rstArm = 0;
 document.addEventListener('click', e => {
   if (!e.target.closest('#netHub')) return;
+  const r1 = e.target.closest('[data-rst]'); if (r1) { clearMark([r1.dataset.rst]); sfx('tick'); LW.toast('Mark cleared'); return renderHub(); }
+  const rb = e.target.closest('[data-rstb]'); if (rb) { clearMark(BR[+rb.dataset.rstb].nodes.map(n => n.k)); sfx('tick'); LW.toast(BR[+rb.dataset.rstb].name + ' marks cleared'); return renderHub(); }
+  if (e.target.id === 'rstAll') {
+    if (!rstArm) { rstArm = 1; e.target.textContent = 'Click again to clear every dot'; setTimeout(() => { rstArm = 0; const b = $('#rstAll'); if (b) b.textContent = 'Clear ALL network marks'; }, 3500); return; }
+    rstArm = 0; clearMark(BR.flatMap(b => b.nodes.map(n => n.k))); sfx('glitch'); LW.toast('All marks cleared'); return renderHub();
+  }
   const s = e.target.closest('[data-seg]'); if (s) return pick(+s.dataset.seg);
   const n = e.target.closest('[data-n]'); if (n) { const b = BR[+n.dataset.b], node = b.nodes[+n.dataset.n]; sfx('granted'); node.run(); }
 });
@@ -559,7 +581,7 @@ function speakNext() {
   if (A.i >= A.q.length) {
     A.playing = false; paintAudio();
     count('audio'); addT('uni', 5, 'AUDIO INTEL absorbed');
-    const st = (LW.S.mods[A.mod.id] ||= { nodes: {}, cards: {}, drills: {}, chal: {} }); (st.nodes[A.node.id] ||= {}).read = 1; LW.save();
+    const st = (LW.S.mods[A.mod.id] ||= { nodes: {}, cards: {}, drills: {}, chal: {} }); const ns = (st.nodes[A.node.id] ||= {}); ns.read = 1; ns.t = Date.now(); LW.save();
     return;
   }
   const u = new SpeechSynthesisUtterance(A.q[A.i]);

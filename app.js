@@ -12,7 +12,7 @@ const RANKS = [
   [0, 'Script Kiddie'], [150, 'Packet Sniffer'], [400, 'Code Breaker'],
   [800, 'Ghost Operator'], [1400, 'Black Hat'], [2200, 'Root'], [3200, 'Lone Wolf']
 ];
-const APP_VERSION = '2.5.0';
+const APP_VERSION = '2.6.0';
 
 // ============ vault: IndexedDB key-value storage ============
 const Vault = (() => {
@@ -76,9 +76,12 @@ function checkContract() {
     setTimeout(() => addXP(50, 'CONTRACT COMPLETE'), 900);
   }
 }
+function normXP(st) { if (st.xpGain == null) st.xpGain = st.xp || 0; if (st.xpLoss == null) st.xpLoss = 0; st.xp = Math.max(0, st.xpGain - st.xpLoss); return st; }
 function addXP(n, msg, bad) {
   const before = rankOf(S.xp)[1];
-  S.xp = Math.max(0, S.xp + n);
+  normXP(S);
+  if (n > 0) S.xpGain += n; else S.xpLoss += -n;
+  S.xp = Math.max(0, S.xpGain - S.xpLoss);
   const after = rankOf(S.xp)[1];
   if (msg) toast(msg + (n ? ` ${n > 0 ? '+' : ''}${n} XP` : ''), bad);
   if (after !== before && n > 0) setTimeout(() => { toast('RANK UP // ' + after); window.SFX && SFX.play('rankup'); }, 1600);
@@ -219,27 +222,65 @@ function openNode(id) {
   const n = MOD.nodes.find(x => x.id === id) || MOD.nodes[0];
   NODE = n.id;
   const st = (M().nodes[n.id] ||= {});
-  if (!st.read) { st.read = 1; addXP(10, 'Intel acquired'); bump('read'); save(); }
   CODES = [];
   const body = marked.parse(n.md || '');
   const cardCount = MOD.cards.filter(c => c.node === n.id).length;
   $('#nodeCard').innerHTML =
     `<div class="chead"><div><div class="code">${esc(n.code)}</div><h1>${esc(n.name)}</h1></div>` +
-    `<div class="row"><button class="btn${st.hacked ? ' go' : ''}" id="hackBtn">${st.hacked ? '✓ Node hacked' : 'Mark node hacked'}</button>` +
+    `<div class="row"><span class="pill${st.read ? ' go' : ''}" id="readPill"></span>${st.read ? '<button class="btn sm" id="unreadBtn" title="Mark as not read yet (−10 XP)">↺ Unread</button>' : ''}<button class="btn${st.hacked ? ' go' : ''}" id="hackBtn">${st.hacked ? '✓ Node hacked' : 'Mark node hacked'}</button>` +
     (cardCount ? `<button class="btn" id="burnBtn">Burn ${cardCount} cards</button>` : '') +
-    `<button class="btn" id="askNode">Ask AI</button></div></div><div class="md">${body}</div>`;
+    `<button class="btn" id="askNode">Ask AI</button></div></div><div class="md">${body}<div id="readEnd" style="height:1px"></div></div>`;
   $$('#nodeCard pre[data-i]').forEach(p => { const c = CODES[+p.dataset.i]; paint(p, c.code, c.lang); });
   $$('#nodeCard .md input[type=checkbox]').forEach(c => c.disabled = true);
   $('#nodeCard').scrollTop = 0;
+  readStart(n, st);
   renderNodes();
+}
+// reading tracker: +10 XP only after enough active reading time AND reaching the end of the note
+let RT = null, lastAct = Date.now();
+['scroll', 'pointerdown', 'keydown', 'wheel', 'touchmove'].forEach(ev => addEventListener(ev, () => { lastAct = Date.now(); }, { capture: true, passive: true }));
+function readPill() {
+  const p = $('#readPill'); if (!p) return;
+  const st = M().nodes[NODE] || {};
+  if (st.read) { p.textContent = '✓ read'; p.className = 'pill go'; return; }
+  if (!RT) return;
+  p.className = 'pill';
+  p.textContent = `📖 ${Math.min(RT.t, RT.need)}s / ${RT.need}s${RT.bottom ? '' : ' · scroll to the end'}`;
+}
+function readStart(n, st) {
+  if (RT) clearInterval(RT.timer);
+  RT = null;
+  if (st.read) { readPill(); return; }
+  const words = (n.md || '').split(/\s+/).length;
+  RT = { id: n.id, need: Math.max(15, Math.min(180, Math.round(words / 250 * 60 * 0.5))), t: 0, bottom: false };
+  RT.timer = setInterval(() => {
+    if (!RT || NODE !== RT.id || !MOD) { if (RT) clearInterval(RT.timer); RT = null; return; }
+    const active = VIEW === 'intel' && !document.hidden && Date.now() - lastAct < 90e3;
+    if (!active) return;
+    RT.t++;
+    const end = $('#readEnd');
+    if (end && end.getBoundingClientRect().top <= innerHeight + 40) RT.bottom = true;
+    if (RT.t >= RT.need && RT.bottom) {
+      clearInterval(RT.timer);
+      const s2 = (M().nodes[RT.id] ||= {});
+      if (!s2.read) { s2.read = 1; s2.t = Date.now(); addXP(10, 'INTEL READ'); bump('read'); window.SFX && SFX.play('granted'); save(); }
+      RT = null; openNode(NODE); return;
+    }
+    readPill();
+  }, 1000);
+  readPill();
 }
 $('#nodes').addEventListener('click', e => { const b = e.target.closest('[data-node]'); if (b) openNode(b.dataset.node); });
 $('#nSearch').addEventListener('input', renderNodes);
 $('#nodeCard').addEventListener('click', async e => {
   const t = e.target.closest('button'); if (!t) return;
+  if (t.id === 'unreadBtn') {
+    const st = M().nodes[NODE]; st.read = 0; st.t = Date.now();
+    addXP(-10, 'Marked unread', true); save(); openNode(NODE); return;
+  }
   if (t.id === 'hackBtn') {
     const st = M().nodes[NODE];
-    st.hacked = !st.hacked;
+    st.hacked = !st.hacked; st.t = Date.now();
     if (st.hacked) window.SFX && SFX.play('granted');
     if (st.hacked && !st.hackedOnce) { st.hackedOnce = 1; addXP(25, 'NODE HACKED'); bump('hack'); } else toast(st.hacked ? 'Node hacked' : 'Node unmarked');
     save(); openNode(NODE);
@@ -635,6 +676,16 @@ function renderLog() {
   $('#heat').innerHTML = cells.join('');
   renderContract();
 }
+$('#wipe').insertAdjacentHTML('beforebegin', '<button class="btn" id="resetReads" style="margin-right:8px">Reset read marks</button>');
+let rrArm = 0;
+$('#resetReads').addEventListener('click', e => {
+  const m = M(), ids = MOD.nodes.filter(n => (m.nodes[n.id] || {}).read).map(n => n.id);
+  if (!ids.length) return toast('No read marks in this module');
+  if (!rrArm) { rrArm = 1; e.target.textContent = `Click again: unread ${ids.length} notes (−${ids.length * 10} XP)`; setTimeout(() => { rrArm = 0; e.target.textContent = 'Reset read marks'; }, 4000); return; }
+  rrArm = 0; e.target.textContent = 'Reset read marks';
+  ids.forEach(id => { m.nodes[id].read = 0; m.nodes[id].t = Date.now(); });
+  addXP(-10 * ids.length, 'Read marks reset', true); save(); renderAll();
+});
 let wipeArm = 0;
 $('#wipe').addEventListener('click', e => {
   if (!wipeArm) { wipeArm = 1; e.target.textContent = 'Click again to confirm wipe'; setTimeout(() => { wipeArm = 0; e.target.textContent = 'Wipe module progress'; }, 3500); return; }
@@ -931,7 +982,7 @@ window.LW = {
   },
   // replace everything (restore / sync): keeps the current view
   async replaceAll(state, vault, silent) {
-    S = Object.assign(blank(), state || {});
+    S = normXP(Object.assign(blank(), state || {}));
     VAULT = vault || {};
     await Vault.set('state', S); await Vault.set('vault', VAULT);
     fillModSel();
@@ -956,7 +1007,7 @@ window.LW = {
   topbar();
   try {
     const st = await Vault.get('state');
-    if (st) S = Object.assign(blank(), st);
+    if (st) S = normXP(Object.assign(blank(), st));
     else {
       // migrate v1 (localStorage) progress if present
       try { const raw = localStorage.getItem('lonewolf-v1'); if (raw) { S = Object.assign(blank(), JSON.parse(raw)); await Vault.set('state', S); } } catch (e) {}

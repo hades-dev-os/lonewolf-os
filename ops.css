@@ -45,6 +45,9 @@
 .blist{display:flex;flex-direction:column;gap:8px}
 .bnode{display:flex;gap:12px;align-items:center;text-align:left;border:1px solid rgba(160,200,255,.16);background:rgba(5,10,20,.85);border-radius:10px;padding:12px;min-height:58px}
 .bnode:hover{border-color:var(--go2)}
+.bwrap{display:flex;gap:6px;align-items:stretch}.bwrap .bnode{flex:1}
+.brst{flex:none;width:42px;border:1px solid rgba(160,200,255,.16);background:rgba(5,10,20,.85);border-radius:10px;color:#9fb2c4;font-size:16px}
+.brst:hover{border-color:var(--red);color:var(--red)}
 .bnode .dt{width:24px;height:24px;border-radius:50%;flex:none;border:2px solid #000;box-shadow:0 0 0 1px #6b7b86;display:grid;place-items:center;font:700 11px var(--mono);font-style:normal;color:#fff}.bnode .dt.today,.bnode .dt.seen{color:#050607}
 .bnode .dt.today{background:var(--go)}.bnode .dt.seen{background:#f4f7f9}.bnode .dt.never{background:#050607}
 .bnode b{display:block;font-weight:500;font-size:14px}
